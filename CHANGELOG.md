@@ -1,0 +1,46 @@
+# Changelog
+
+本文件记录项目重要变更，格式遵循 Keep a Changelog，并优先维护 `[Unreleased]`。
+
+## [Unreleased]
+
+### Added（新增）
+
+- 明确项目定位为 `bensz auto contribution` 贡献归因与审计系统，核心产物为 `.bac` 文件。
+- 补充 `.bac` 的初始设计边界：追加式事件、哈希链、签名、项目上下文绑定与篡改可发现。
+
+### Changed（变更）
+
+- 将初始化生成的通用项目说明替换为面向 AI tool 集成和人机贡献区分的项目指令。
+
+## [1.0.0] - 2026-05-26
+
+### Added（新增）
+
+- 初始化 AI 项目指令文件：生成 `AGENTS.md`、`CLAUDE.md`、`README.md` 与 `.gitignore`
+- 配置项目工程原则、工作流和变更记录规范
+
+### Changed（变更）
+
+### Fixed（修复）
+
+---
+
+## 记录规则
+
+- 必须记录影响项目行为、结构、工作流、工程原则、指令文件或关键配置的变更
+- 记录应说明改了什么、为什么改，以及影响范围
+- 版本号遵循 SemVer：bug fix 递增修订号，新功能递增次版本号，破坏性变更递增主版本号
+
+```markdown
+## [版本号] - YYYY-MM-DD
+
+### Added（新增）
+- 新增了 XXX：用途是 YYY
+
+### Changed（变更）
+- 修改了 XXX：原因是 YYY，影响是 ZZZ
+
+### Fixed（修复）
+- 修复了 XXX：表现是 YYY，修复方式是 ZZZ
+```
