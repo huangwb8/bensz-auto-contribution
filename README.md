@@ -16,19 +16,55 @@
 
 ### 环境要求
 
-- 项目仍处于初始化阶段，运行环境和语言栈待实现阶段确定
+- Python 3.10+
+- 无运行时第三方依赖
 
 ### 安装
 
 ```bash
-# 待实现
+python -m pip install -e .
 ```
 
 ### 使用
 
 ```bash
-# 待实现：创建、追加和验证 .bac 文件
+# 创建 project.bac，并写入 genesis event
+bac init
+
+# 记录人类需求
+bac record \
+  --event-type human_instruction \
+  --source-type human \
+  --summary "Add BAC verification workflow"
+
+# 记录 AI 生成或修改意图
+bac record \
+  --event-type ai_generation \
+  --source-type ai \
+  --summary "Implemented hash-chain verifier"
+
+# 记录工具命令结果
+bac record \
+  --event-type test_result \
+  --source-type tool \
+  --summary "Unit tests passed" \
+  --command-text "python -m unittest discover -s tests -v" \
+  --exit-code 0
+
+# 记录本地 checkpoint，降低尾部截断风险
+bac record \
+  --event-type checkpoint \
+  --source-type system \
+  --summary "Local checkpoint"
+
+# 验证 .bac 完整性
+bac verify
+
+# 查看贡献时间线
+bac inspect
 ```
+
+所有命令都支持 `--root` 指定项目根目录，支持 `--bac-file` 指定 `.bac` 文件路径。`init`、`record`、`verify`、`inspect` 均支持 `--json` 输出，便于 AI tool 或其它自动化流程调用。
 
 ## 设计边界
 
@@ -36,6 +72,32 @@
 - `.bac` 不应记录敏感密钥、完整私有提示词或无关用户隐私
 - 任何 AI 贡献记录都应尽量关联实际 diff、命令输出、测试结果或用户确认
 - 涉及签名、哈希、身份和时间戳的逻辑必须有测试覆盖
+- 当前 MVP 支持未签名事件、哈希链验证、本地 checkpoint 和敏感信息脱敏；Ed25519 签名与外部可信时间戳保留为后续扩展
+
+## `.bac` 格式
+
+默认文件名为 `project.bac`，格式为 JSON Lines。每一行都是一条 canonical JSON 事件，事件包含：
+
+- `format`：固定为 `bac.v1`
+- `event_type`：如 `genesis`、`human_instruction`、`ai_generation`、`tool_command`、`file_change`、`test_result`、`checkpoint`
+- `source_type`：固定区分 `human`、`ai`、`tool`、`system`
+- `trust_level`：区分 `declared`、`observed`、`signed`、`verified`、`anchored`
+- `project`：记录项目根路径、项目绑定 hash、git remote、commit、branch 和 dirty 状态
+- `payload`：记录摘要、命令、文件快照等事件内容
+- `evidence`：记录 diff 摘要、文件摘要等可验证证据
+- `redactions`：记录脱敏字段和原因
+- `prev_event_hash` 与 `event_hash`：形成可复算哈希链
+
+`event_hash` 基于排序后的 canonical JSON 计算，可发现历史事件内容修改、插入、删除中间事件和重排。没有外部 anchor 时，单纯哈希链不能完全发现尾部截断；本地 `checkpoint` 用于记录当前 head hash，后续可扩展到 git note、发布产物或可信时间戳服务。
+
+## 开发与验证
+
+```bash
+python -m pytest -q
+python -m unittest discover -s tests -v
+```
+
+核心测试覆盖 canonicalization、哈希链复算、篡改检测、checkpoint 验证、敏感信息脱敏和 CLI 端到端流程。
 
 ## 目录结构
 
@@ -44,6 +106,15 @@ auto-contribution/
 ├── AGENTS.md
 ├── CHANGELOG.md
 ├── CLAUDE.md
+├── pyproject.toml
+├── src
+│   └── bac
+│       ├── adapters
+│       ├── core
+│       ├── report
+│       ├── service
+│       └── storage
+├── tests
 ├── docs
 │   └── plans
 ├── README.md
