@@ -90,6 +90,8 @@ bac inspect
 
 `event_hash` 基于排序后的 canonical JSON 计算，可发现历史事件内容修改、插入、删除中间事件和重排。没有外部 anchor 时，单纯哈希链不能完全发现尾部截断；本地 `checkpoint` 用于记录当前 head hash，后续可扩展到 git note、发布产物或可信时间戳服务。
 
+更多字段解释、CLI 参数映射和哈希链原理见 [BAC 工作原理教程](docs/bac-tutorial.md)。
+
 ## 开发与验证
 
 ```bash

@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-05-28
+
 ### Added（新增）
 
 - 明确项目定位为 `bensz auto contribution` 贡献归因与审计系统，核心产物为 `.bac` 文件。
@@ -12,6 +14,7 @@
 - 实现 BAC MVP：新增 Python CLI 与 library，支持 `bac init`、`bac record`、`bac verify`、`bac inspect`，以 JSON Lines 追加式事件账本记录贡献。
 - 新增 canonical JSON、SHA-256 哈希链、项目上下文绑定、本地 checkpoint、敏感信息脱敏、贡献时间线展示和机器可读验证报告。
 - 新增测试覆盖 canonicalization、哈希链验证、篡改检测、脱敏策略、checkpoint 和 CLI 端到端流程。
+- 新增 BAC 工作原理教程，解释 `.bac` 事件字段、CLI 参数映射、哈希链验证机制和当前安全边界。
 
 ### Changed（变更）
 
@@ -19,7 +22,7 @@
 - 将初始化生成的通用项目说明替换为面向 AI tool 集成和人机贡献区分的项目指令。
 - 更新 README，补充安装方式、CLI 使用示例、`.bac` 格式说明、MVP 安全边界和验证命令。
 
-## [1.0.0] - 2026-05-26
+## [0.1.0] - 2026-05-26
 
 ### Added（新增）
 
