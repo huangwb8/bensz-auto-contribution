@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### Changed（变更）
+
+- 根据 `init-project` 最新规范优化 `AGENTS.md`：补充 BAC 默认贡献记录约定、Single Source of Truth 维护规则，以及 `CLAUDE.md` 引用关系检查要求。
+
 ## [1.1.0] - 2026-05-29
 
 ### Added（新增）
