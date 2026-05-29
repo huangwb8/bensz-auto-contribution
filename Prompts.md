@@ -4,11 +4,9 @@
 
 ```
 github项目：huangwb8/bensz-auto-contribution
-version=1.0.0
+version=1.0.1
 git-commit skill保存变更; 最后一个commit要新增 tag 为 v{version}，并且该commit信息要提到更新版本； git-publish-release skill 发布为一个release到github仓库。
 ```
-
-
 
 # 日常
 
