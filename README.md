@@ -30,6 +30,7 @@ BAC does not claim that a file can never be modified. Instead, it makes changes 
 - 🔗 **Hash-Chain Verification**: Detects modified, inserted, deleted, duplicated, or reordered events.
 - 📦 **Single-File `.bac` Container**: Stores a ZIP-based v2 ledger with `manifest.json` and canonical JSON event files.
 - 🛡️ **Tamper-Evident Security Boundary**: Describes integrity guarantees honestly without overstating immutability.
+- ⏱️ **Private Anchors**: Supports local mode and hybrid mode with blinded remote anchor receipts.
 - 🧠 **AI Tool Ready**: Designed for Codex CLI, Claude Code, and other agentic coding environments.
 - 🔍 **Evidence-Aware Records**: Captures file hashes, git diff summaries, command text, exit codes, test results, and checkpoints.
 - 🧼 **Sensitive Data Redaction**: Avoids storing secrets, private prompts, or unrelated user data by default.
@@ -124,6 +125,34 @@ bac inspect
 
 All commands support `--root` for the target project root and `--bac-file` for a custom `.bac` path. `init`, `record`, `verify`, and `inspect` also support `--json` for machine-readable output.
 
+### Private Anchor Workflow
+
+`bac init` defaults to `hybrid` mode while keeping records local-first. It can create a blinded anchor request without uploading `.bac` content, file paths, diffs, prompts, actors, project names, or the raw `head_hash`:
+
+```bash
+bac anchor request --json
+```
+
+Import a signed receipt from an anchor service:
+
+```bash
+bac anchor import --receipt-file receipt.json --public-key "$ANCHOR_PUBLIC_KEY"
+bac verify --require-anchor
+```
+
+For a configured service:
+
+```bash
+bac config set anchor.url http://localhost:8080
+bac anchor push
+```
+
+The optional reference service lives in `server/` and can be started with:
+
+```bash
+docker compose -f server/docker-compose.yml up --build
+```
+
 ## 🧩 Where BAC Fits
 
 BAC is a process record and audit aid, not a final judge of contribution ownership.
@@ -166,7 +195,7 @@ BAC is **tamper-evident**, not tamper-proof.
 
 It can detect common integrity problems such as edited event content, missing events, reordered events, duplicated internal ZIP paths, broken event numbering, mismatched genesis metadata, invalid hash links, and checkpoint inconsistencies.
 
-Without an external anchor, a purely local hash chain cannot fully prevent tail truncation. BAC therefore supports local checkpoints today and keeps room for future Ed25519 signatures, git notes, release artifacts, trusted timestamps, or external transparency logs.
+Without an external anchor, a purely local hash chain cannot fully prevent tail truncation. BAC therefore supports local checkpoints and remote signed receipts. A valid receipt proves that a blinded ledger head existed at the service timestamp; it does not prove that every real-world action was recorded.
 
 ## 🧪 Development
 
@@ -177,7 +206,7 @@ python -m pytest -q
 python -m unittest discover -s tests -v
 ```
 
-Current coverage includes canonicalization, v2 container structure, hash-chain recomputation, tamper detection, duplicate internal path detection, checkpoint verification, sensitive data redaction, and CLI end-to-end flows.
+Current coverage includes canonicalization, v2 container structure, hash-chain recomputation, tamper detection, duplicate internal path detection, checkpoint verification, private anchor receipt verification, sensitive data redaction, server API flows, and CLI end-to-end flows.
 
 Build and check PyPI distributions locally:
 
@@ -211,7 +240,8 @@ bensz-auto-contribution/
 │       ├── report
 │       ├── service
 │       └── storage
-└── tests
+├── tests
+└── server
 ```
 
 ## 🤖 AI-Assisted Development

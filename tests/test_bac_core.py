@@ -121,7 +121,7 @@ class BacCoreTests(unittest.TestCase):
 
             report = verify_bac_file(bac_file)
             self.assertEqual(report.status, "pass")
-            self.assertEqual(report.anchor_status, "anchored")
+            self.assertEqual(report.anchor_status, "local_checkpoint")
 
     def test_redaction_masks_secrets_and_records_metadata(self) -> None:
         redacted, metadata = redact_data({"command": "curl -H 'Authorization: sk-testsecret123456789012345'"})

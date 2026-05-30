@@ -106,6 +106,19 @@ bac verify
 bac inspect
 ```
 
+生成隐私保护 anchor request：
+
+```bash
+bac anchor request --json
+```
+
+导入远程服务返回的 signed receipt，并在审计场景要求有效 receipt：
+
+```bash
+bac anchor import --receipt-file receipt.json --public-key "$ANCHOR_PUBLIC_KEY"
+bac verify --require-anchor
+```
+
 ## 一条事件的结构
 
 下面是简化后的事件示例：
@@ -279,7 +292,7 @@ bac inspect
 
 `signature`
 
-签名字段。当前 v2 要求它可以是 `null` 或对象，但还没有实现签名验证。验证器遇到非空签名会报告当前尚不支持签名验证。因此目前不要把它理解为已经完成的身份真实性保障。
+事件顶层签名字段。当前 v2 要求它可以是 `null` 或对象，但还没有实现通用事件签名验证。验证器遇到非空事件签名会报告当前尚不支持签名验证。远程 anchor receipt 的 Ed25519 签名不放在这里，而是放在 `checkpoint` 事件的 `payload.anchor.anchor_receipt` 中。
 
 ## CLI 参数如何变成事件
 
@@ -296,6 +309,14 @@ bac inspect
 `init --force`
 
 初始化账本。如果目标 `.bac` 已存在且非空，默认拒绝覆盖；传 `--force` 会重写。
+
+`init --mode`
+
+设置账本锚定模式，支持 `local` 和 `hybrid`。默认是 `hybrid`，但没有配置 `anchor.url` 时不会自动联网。
+
+`init --anchor-url`
+
+初始化时写入锚定服务地址，供后续 `bac anchor push` 使用。
 
 `init --actor-name` 与 `init --actor-kind`
 
@@ -364,6 +385,32 @@ bac record \
 
 让命令输出 machine-readable JSON，方便 AI tool 或脚本调用。
 
+`config set`
+
+追加一条配置事件，当前支持 `mode`、`anchor.url` 和 `anchor.require`：
+
+```bash
+bac config set mode hybrid
+bac config set anchor.url http://localhost:8080
+bac config set anchor.require true
+```
+
+`anchor request`
+
+基于当前 head 和本地 `ledger_nonce` 生成最小 anchor request。请求只包含盲化后的 `anchor_hash`、客户端时间、可选匿名账本信息和 sequence，不包含项目名、路径、diff、payload、prompt、actor 或原始 `head_hash`。
+
+`anchor import`
+
+读取锚定服务返回的 receipt，使用传入的 Ed25519 public key 验签，然后追加 `trust_level: anchored` 的 checkpoint 事件。
+
+`anchor push`
+
+读取 `anchor.url`，向服务端发送 anchor request，接收 receipt，获取或使用指定 public key 验签，然后追加 anchored checkpoint。远程失败不会影响已经存在的本地记录。
+
+`verify --require-anchor`
+
+强制要求至少存在一个有效远程 receipt。适用于正式审计；普通 `bac verify` 仍会允许纯本地账本通过或给出 warning。
+
 ## 哈希链原理
 
 BAC 的哈希链有两个关键字段：
@@ -407,6 +454,34 @@ event_hash = hash(third_event_without_event_hash)
 
 不过，单纯本地哈希链不能完全防止尾部截断。例如攻击者删除最后几条事件后，剩余前缀本身仍可能是一条自洽链。当前 v2 用 `checkpoint` 表示“我在这里见过这个 head hash”，后续可以把 checkpoint head 发布到 git note、release artifact 或可信时间戳服务，以增强尾部截断发现能力。
 
+## 隐私保护锚定原理
+
+BAC 的默认锚定模式是 `hybrid`：完整 `.bac` 仍只保存在本地，远程服务只接收盲化摘要：
+
+```text
+anchor_hash = sha256(canonical_json({
+  "domain": "bac.anchor.v1",
+  "ledger_nonce": 本地 nonce,
+  "head_hash": 当前账本 head
+}))
+```
+
+`ledger_nonce` 保存在本地 `.bac` 配置和 anchored checkpoint 中。远程服务无法从 `anchor_hash` 反推出项目内容、路径、diff、prompt 或原始 `head_hash`。
+
+服务端返回的 receipt 会用 Ed25519 签名固定的 canonical signing payload。验证器会检查：
+
+- receipt schema 是否合法
+- receipt 的 `anchor_hash` 是否绑定 checkpoint 前一条事件的 `event_hash`
+- receipt 签名是否能被 checkpoint 记录的 public key 验证
+- `--require-anchor` 是否满足至少一个有效 receipt
+
+`anchor_status` 现在细分为：
+
+- `not_anchored`：没有 checkpoint
+- `local_checkpoint`：只有本地 checkpoint
+- `receipt_valid`：至少一个远程 receipt 有效
+- `receipt_invalid`：存在远程 receipt 但无法通过绑定或签名验证
+
 ## 验证器会检查什么
 
 `bac verify` 会检查：
@@ -430,6 +505,7 @@ event_hash = hash(third_event_without_event_hash)
 - 每条事件正确连接到上一条事件
 - 同一账本内 `project.root_hash` 不变
 - checkpoint 的 `checkpointed_head_hash` 等于它自己的 `prev_event_hash`
+- anchored checkpoint 的 receipt 绑定前序 head，且 Ed25519 签名有效
 
 验证结果有三种状态：
 
@@ -469,14 +545,15 @@ event_hash = hash(third_event_without_event_hash)
 - 文件快照 hash
 - git diff 摘要证据
 - 本地 checkpoint
+- 隐私保护 anchor request/import/push
+- Ed25519 receipt 验签
 - 敏感信息脱敏
 - 账本验证和时间线查看
 
 当前尚未实现：
 
-- Ed25519 或其它真实签名验证
-- 外部可信时间戳
-- 远程或公开 anchor
+- 通用事件顶层签名验证
+- 公开透明日志
 - 自动执行命令并捕获 stdout/stderr
 - 对文件内容语义变化的判断
 - 对 actor 声明身份的真实性证明

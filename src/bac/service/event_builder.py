@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from secrets import token_hex
 from typing import Any
 
 from bac import __version__
@@ -23,11 +24,16 @@ def new_event_id() -> str:
     return f"bac_{stamp}_{uuid.uuid4().hex[:16]}"
 
 
-def build_genesis_event(root: Path, actor: dict[str, Any] | None = None) -> dict[str, Any]:
+def build_genesis_event(
+    root: Path,
+    actor: dict[str, Any] | None = None,
+    bac_config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     payload = {
         "summary": "Initialized BAC ledger",
         "tool": "bac",
         "tool_version": __version__,
+        "bac_config": bac_config or default_bac_config(),
     }
     return build_event(
         root=root,
@@ -86,6 +92,35 @@ def build_record_event(
     )
 
 
+def build_anchor_checkpoint_event(
+    *,
+    root: Path,
+    prev_event_hash: str,
+    anchor_receipt: dict[str, Any],
+    ledger_nonce: str,
+    anchor_public_key: str,
+    summary: str = "Remote anchor checkpoint",
+    actor: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return build_record_event(
+        root=root,
+        prev_event_hash=prev_event_hash,
+        event_type="checkpoint",
+        source_type="system",
+        summary=summary,
+        trust_level="anchored",
+        actor=actor or default_actor("bac", "system_tool"),
+        payload={
+            "anchor": {
+                "format": "bac.anchor.checkpoint.v1",
+                "ledger_nonce": ledger_nonce,
+                "anchor_public_key": anchor_public_key,
+                "anchor_receipt": anchor_receipt,
+            }
+        },
+    )
+
+
 def build_event(
     *,
     root: Path,
@@ -128,6 +163,14 @@ def default_actor(name: str, kind: str, session_id: str | None = None) -> dict[s
     if session_id:
         actor["session_id"] = session_id
     return actor
+
+
+def default_bac_config() -> dict[str, Any]:
+    return {
+        "mode": "hybrid",
+        "anchor.require": False,
+        "anchor.ledger_nonce": token_hex(32),
+    }
 
 
 def _default_trust(event_type: str, source_type: str) -> str:

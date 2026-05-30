@@ -28,6 +28,10 @@ classifiers = [
 ]
 dependencies = []
 
+[project.optional-dependencies]
+anchor = ["cryptography>=42"]
+server = ["cryptography>=42", "fastapi>=0.110", "uvicorn[standard]>=0.27"]
+
 [project.scripts]
 bac = "bac.adapters.cli:main"
 
@@ -43,4 +47,4 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
-testpaths = ["tests"]
+testpaths = ["tests", "server/tests"]

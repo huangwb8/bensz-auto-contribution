@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 from zipfile import BadZipFile, ZipFile
 
+from bac.core.anchor import compute_anchor_hash, verify_anchor_receipt
 from bac.core.container import (
     CONTAINER_FORMAT_VERSION,
     EVENT_PATH_TEMPLATE,
@@ -26,6 +27,7 @@ class VerificationReport:
     head_hash: str | None = None
     signature_status: str = "unsigned"
     anchor_status: str = "not_anchored"
+    anchored_head_hashes: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
@@ -36,12 +38,13 @@ class VerificationReport:
             "head_hash": self.head_hash,
             "signature_status": self.signature_status,
             "anchor_status": self.anchor_status,
+            "anchored_head_hashes": self.anchored_head_hashes,
             "warnings": self.warnings,
             "errors": self.errors,
         }
 
 
-def verify_bac_file(path: Path) -> VerificationReport:
+def verify_bac_file(path: Path, require_anchor: bool = False) -> VerificationReport:
     if not path.exists():
         return VerificationReport(status="fail", errors=[f"BAC file does not exist: {path}"])
 
@@ -74,13 +77,13 @@ def verify_bac_file(path: Path) -> VerificationReport:
             errors=[f"BAC file is not a valid v2 ZIP container: {path}"],
         )
 
-    report = verify_events(events)
+    report = verify_events(events, require_anchor=require_anchor)
     report.errors = errors + _manifest_consistency_errors(manifest, events) + report.errors
     report.status = _status(report.errors, report.warnings)
     return report
 
 
-def verify_events(events: list[Any]) -> VerificationReport:
+def verify_events(events: list[Any], require_anchor: bool = False) -> VerificationReport:
     warnings: list[str] = []
     errors: list[str] = []
     previous_hash: str | None = None
@@ -88,6 +91,10 @@ def verify_events(events: list[Any]) -> VerificationReport:
     project_root_hash: str | None = None
     signed_count = 0
     checkpoint_count = 0
+    local_checkpoint_count = 0
+    valid_receipt_count = 0
+    invalid_receipt_count = 0
+    anchored_head_hashes: list[str] = []
 
     if not events:
         return VerificationReport(status="fail", errors=["BAC file contains no events"])
@@ -139,9 +146,24 @@ def verify_events(events: list[Any]) -> VerificationReport:
 
         if event.get("event_type") == "checkpoint":
             checkpoint_count += 1
-            checkpointed = event.get("payload", {}).get("checkpointed_head_hash")
+            payload = event.get("payload", {})
+            checkpointed = payload.get("checkpointed_head_hash") if isinstance(payload, dict) else None
             if checkpointed != event.get("prev_event_hash"):
                 errors.append(f"event {event_id}: checkpointed_head_hash must match prev_event_hash")
+            anchor = payload.get("anchor") if isinstance(payload, dict) else None
+            if isinstance(anchor, dict) and anchor.get("anchor_receipt") is not None:
+                if _verify_checkpoint_anchor(
+                    event_id,
+                    checkpointed,
+                    anchor,
+                    anchored_head_hashes,
+                    errors,
+                ):
+                    valid_receipt_count += 1
+                else:
+                    invalid_receipt_count += 1
+            else:
+                local_checkpoint_count += 1
 
         previous_hash = event.get("event_hash")
 
@@ -152,9 +174,19 @@ def verify_events(events: list[Any]) -> VerificationReport:
     else:
         signature_status = "invalid"
 
-    anchor_status = "anchored" if checkpoint_count else "not_anchored"
+    if invalid_receipt_count:
+        anchor_status = "receipt_invalid"
+    elif valid_receipt_count:
+        anchor_status = "receipt_valid"
+    elif local_checkpoint_count:
+        anchor_status = "local_checkpoint"
+    else:
+        anchor_status = "not_anchored"
+
     if checkpoint_count == 0:
         warnings.append("no checkpoint event found; tail truncation is not anchored")
+    if require_anchor and anchor_status != "receipt_valid":
+        errors.append("a valid remote anchor receipt is required but was not found")
 
     return VerificationReport(
         status=_status(errors, warnings),
@@ -162,9 +194,46 @@ def verify_events(events: list[Any]) -> VerificationReport:
         head_hash=previous_hash,
         signature_status=signature_status,
         anchor_status=anchor_status,
+        anchored_head_hashes=anchored_head_hashes,
         warnings=warnings,
         errors=errors,
     )
+
+
+def _verify_checkpoint_anchor(
+    event_id: str,
+    checkpointed_head_hash: Any,
+    anchor: dict[str, Any],
+    anchored_head_hashes: list[str],
+    errors: list[str],
+) -> bool:
+    receipt = anchor.get("anchor_receipt")
+    public_key = anchor.get("anchor_public_key")
+    ledger_nonce = anchor.get("ledger_nonce")
+    if not isinstance(checkpointed_head_hash, str):
+        errors.append(f"event {event_id}: anchored checkpoint is missing checkpointed_head_hash")
+        return False
+    if not isinstance(receipt, dict):
+        errors.append(f"event {event_id}: anchor_receipt must be an object")
+        return False
+    if not isinstance(public_key, str) or not public_key:
+        errors.append(f"event {event_id}: anchor_public_key is required for receipt verification")
+        return False
+    try:
+        expected_anchor_hash = compute_anchor_hash(checkpointed_head_hash, ledger_nonce)
+    except ValueError as exc:
+        errors.append(f"event {event_id}: {exc}")
+        return False
+    if receipt.get("anchor_hash") != expected_anchor_hash:
+        errors.append(f"event {event_id}: anchor_receipt.anchor_hash does not match checkpointed head")
+        return False
+
+    result = verify_anchor_receipt(receipt, public_key)
+    if not result.valid:
+        errors.extend(f"event {event_id}: {error}" for error in result.errors)
+        return False
+    anchored_head_hashes.append(checkpointed_head_hash)
+    return True
 
 
 def _status(errors: list[str], warnings: list[str]) -> str:

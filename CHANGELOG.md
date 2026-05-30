@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+### Added（新增）
+
+- 新增 private-anchor 客户端核心：支持盲化 `anchor_hash`、anchor request/receipt schema 校验、Ed25519 receipt 验签、anchored checkpoint 和 `verify --require-anchor`。
+- 新增 CLI 锚定工作流：`bac init --mode/--anchor-url`、`bac config set/get`、`bac anchor request/import/push`，保持本地记录优先，远程失败不影响已有账本。
+- 新增 `server/` reference anchor server：提供 FastAPI + SQLite + Ed25519 签名的 `/healthz`、public keys、anchor 创建、receipt 查询、ledger receipt 查询和只读 `/admin` 页面，并补充 Docker Compose 部署说明。
+- 新增 `anchor` 与 `server` 可选依赖组，用于签名验签和自托管服务端。
+
+### Changed（变更）
+
+- 调整 private-anchor 实施计划：从单纯外部锚定协议升级为本地端与 `./server` 自托管服务端协同的完整路线，明确默认 `hybrid` 模式、可选 `local` 模式、Docker 部署、后台管理、服务端 API、密钥管理和隐私边界。
+- 将 `anchor_status` 从单一 `anchored` 细分为 `not_anchored`、`local_checkpoint`、`receipt_valid` 和 `receipt_invalid`，更准确区分本地 checkpoint 与远程 signed receipt。
+
 ## [1.1.2] - 2026-05-30
 
 ### Added（新增）
