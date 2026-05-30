@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### Added（新增）
+
+- 新增 DockerHub 本地直推发布流程：提供 `tools/dockerhub-publish.sh` 与 `make dockerhub-publish`，仅构建并发布 `linux/amd64` 镜像，不经过 GitHub Actions；同步补充发布文档、README 入口和服务端说明。
+
 ## [1.2.0] - 2026-05-30
 
 ### Added（新增）

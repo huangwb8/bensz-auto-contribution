@@ -25,6 +25,14 @@ docker compose -f server/docker-compose.yml up --build
 
 The compose file uses SQLite in a named volume and development key generation for local smoke tests. For production, set `BAC_ANCHOR_ENV=production` and provide an Ed25519 private key through `BAC_ANCHOR_PRIVATE_KEY_PATH` or `BAC_ANCHOR_PRIVATE_KEY_B64`.
 
+To publish the server image directly to DockerHub as `linux/amd64`, use the local release script:
+
+```bash
+make dockerhub-publish
+```
+
+See [DockerHub Release](../docs/dockerhub-release.md) for Docker login, tag rules, and safety checks.
+
 ## API
 
 - `GET /healthz`

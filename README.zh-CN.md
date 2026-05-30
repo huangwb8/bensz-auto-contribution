@@ -218,6 +218,14 @@ python -m twine check dist/*
 
 项目通过 GitHub Actions 和 PyPI Trusted Publishing 发布到 PyPI。详见 [PyPI 发布流程](docs/pypi-release.md)。
 
+直接发布 BAC Anchor Server 的 DockerHub `linux/amd64` 镜像：
+
+```bash
+make dockerhub-publish
+```
+
+详见 [DockerHub 发布流程](docs/dockerhub-release.md)。这条路径面向本地机器或自建发布机，不经过 GitHub Actions。
+
 ## 🗂️ 目录结构
 
 ```text
@@ -230,8 +238,10 @@ bensz-auto-contribution/
 ├── README.zh-CN.md
 ├── docs
 │   ├── bac-tutorial.md
+│   ├── dockerhub-release.md
 │   ├── pypi-release.md
 │   └── plans
+├── Makefile
 ├── pyproject.toml
 ├── src
 │   └── bac
@@ -241,6 +251,7 @@ bensz-auto-contribution/
 │       ├── service
 │       └── storage
 ├── tests
+├── tools
 └── server
 ```
 

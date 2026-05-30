@@ -218,6 +218,14 @@ python -m twine check dist/*
 
 Releases are published to PyPI through GitHub Actions and PyPI Trusted Publishing. See [PyPI Release](docs/pypi-release.md).
 
+Publish the BAC Anchor Server Docker image directly to DockerHub as `linux/amd64`:
+
+```bash
+make dockerhub-publish
+```
+
+See [DockerHub Release](docs/dockerhub-release.md). This path is intentionally local/publisher-machine based and does not use GitHub Actions.
+
 ## 🗂️ Project Structure
 
 ```text
@@ -230,8 +238,10 @@ bensz-auto-contribution/
 ├── README.zh-CN.md
 ├── docs
 │   ├── bac-tutorial.md
+│   ├── dockerhub-release.md
 │   ├── pypi-release.md
 │   └── plans
+├── Makefile
 ├── pyproject.toml
 ├── src
 │   └── bac
@@ -241,6 +251,7 @@ bensz-auto-contribution/
 │       ├── service
 │       └── storage
 ├── tests
+├── tools
 └── server
 ```
 
