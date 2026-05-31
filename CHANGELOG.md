@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+## [1.2.3] - 2026-05-31
+
+### Added（新增）
+
+- 新增 BAC Cloud 账号与项目账本绑定流程：服务端支持用户注册、登录、用户 token、cloud ledger 创建和 Web 登录页；CLI 新增 `bac cloud register/login/link/status`。
+- 新增云端自动锚定：`bac cloud link` 会把本地 `.bac` 配置为 `hybrid`、启用 `anchor.require` 与 `cloud.auto_anchor`，后续 `bac record` 会自动向已绑定服务端提交盲化 anchor request 并写回 signed checkpoint。
+- Anchor request 新增可选 `client_summary`，仅上传事件数量、来源/信任等级计数和当前 head 事件类型等低敏摘要，避免上传路径、diff、payload、prompt、actor 或原始 `head_hash`。
+
 ## [1.2.2] - 2026-05-31
 
 ### Added（新增）
