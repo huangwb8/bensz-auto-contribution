@@ -1,0 +1,83 @@
+services:
+  # ── BAC Anchor 核心服务 ──────────────────────────────────────
+  bac-anchor-app:
+    image: "huangwb8/bensz-auto-contribution:${BAC_ANCHOR_RELEASE_VERSION:?set BAC_ANCHOR_RELEASE_VERSION to a published release version, for example 1.2.2}"
+    # build:
+    #   context: ../..
+    #   dockerfile: server/Dockerfile
+    container_name: bac-anchor-app
+    expose:
+      - "8080"
+    env_file:
+      - .env
+    environment:
+      BAC_ANCHOR_ENV: ${BAC_ANCHOR_ENV:-production}
+      BAC_ANCHOR_DB_URL: postgresql://${POSTGRES_USER:-bac_anchor}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@bac-anchor-postgres:5432/${POSTGRES_DB:-bac_anchor}
+      BAC_ANCHOR_REDIS_URL: redis://bac-anchor-redis:6379/${REDIS_DB:-0}
+      BAC_ANCHOR_PRIVATE_KEY_B64: ${BAC_ANCHOR_PRIVATE_KEY_B64:?set BAC_ANCHOR_PRIVATE_KEY_B64}
+      BAC_ANCHOR_KEY_ID: ${BAC_ANCHOR_KEY_ID:-}
+      BAC_ANCHOR_API_TOKEN: ${BAC_ANCHOR_API_TOKEN:?set BAC_ANCHOR_API_TOKEN}
+      BAC_ANCHOR_ADMIN_TOKEN: ${BAC_ANCHOR_ADMIN_TOKEN:?set BAC_ANCHOR_ADMIN_TOKEN}
+      BAC_ANCHOR_ENABLE_LEDGER_QUERY: ${BAC_ANCHOR_ENABLE_LEDGER_QUERY:-false}
+      BAC_ANCHOR_MAX_BODY_BYTES: ${BAC_ANCHOR_MAX_BODY_BYTES:-8192}
+      BAC_ANCHOR_RATE_LIMIT_PER_MINUTE: ${BAC_ANCHOR_RATE_LIMIT_PER_MINUTE:-120}
+      TZ: ${TZ:-Asia/Shanghai}
+    depends_on:
+      bac-anchor-postgres:
+        condition: service_healthy
+      bac-anchor-redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  bac-anchor-postgres:
+    image: postgres:17-alpine
+    container_name: bac-anchor-postgres
+    env_file:
+      - .env
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-bac_anchor} -d ${POSTGRES_DB:-bac_anchor}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  bac-anchor-redis:
+    image: redis:7-alpine
+    container_name: bac-anchor-redis
+    command: redis-server --appendonly yes --dir /data
+    volumes:
+      - ./data/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+networks:
+  default:
+    name: npm_default
+    external: true

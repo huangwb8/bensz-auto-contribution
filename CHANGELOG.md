@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-05-31
+
+### Added（新增）
+
+- 新增 `bac inspect` 贡献提取过滤能力：支持 `--human` 快速提取人类贡献，并支持 `--source-type`、`--since`、`--until`、`--on` 按来源和 UTC 日期/时间范围筛选 `.bac` 事件。
+- 新增 `docs/deploy` 服务器部署包：提供 BAC Anchor 的 Docker Compose、`.env.example`、部署/日志/备份/恢复脚本，默认使用 `npm_default` 网络和 `bac-anchor-app`、`bac-anchor-postgres`、`bac-anchor-redis` 容器命名。
+
+### Changed（变更）
+
+- 扩展 BAC Anchor Server 生产依赖：支持 PostgreSQL 作为持久化数据库，并在配置 `BAC_ANCHOR_REDIS_URL` 时使用 Redis 保存生产限流状态。
+- 更新 PyPI 发布说明：补充基于本地 PyPI 配置的 twine 直传流程，覆盖不经过 GitHub Actions 的发布场景。
+
 ## [1.2.1] - 2026-05-31
 
 ### Added（新增）

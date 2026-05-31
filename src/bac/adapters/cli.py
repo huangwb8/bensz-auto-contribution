@@ -83,6 +83,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     inspect = subparsers.add_parser("inspect", help="show a contribution timeline")
     inspect.add_argument("--limit", type=int)
+    inspect.add_argument("--human", action="store_true", help="shortcut for --source-type human")
+    inspect.add_argument("--source-type", choices=sorted(SOURCE_TYPES), help="filter events by source type")
+    inspect.add_argument("--since", help="include events at or after a UTC date or ISO-8601 timestamp")
+    inspect.add_argument("--until", help="include events through a UTC date or before an ISO-8601 timestamp")
+    inspect.add_argument("--on", help="include events on a single UTC date in YYYY-MM-DD format")
     inspect.add_argument("--json", action="store_true", help="print machine-readable output")
     inspect.set_defaults(func=_cmd_inspect)
 
@@ -212,8 +217,20 @@ def _cmd_verify(args: argparse.Namespace) -> int:
 
 def _cmd_inspect(args: argparse.Namespace) -> int:
     root = Path(args.root).resolve()
+    source_type = args.source_type
+    if args.human:
+        if source_type and source_type != "human":
+            raise ValueError("--human cannot be combined with --source-type other than human")
+        source_type = "human"
     events = read_events(_bac_path(root, args.bac_file))
-    items = timeline(events, args.limit)
+    items = timeline(
+        events,
+        limit=args.limit,
+        source_type=source_type,
+        since=args.since,
+        until=args.until,
+        on=args.on,
+    )
     if args.json:
         print(canonical_json(items))
     else:

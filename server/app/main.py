@@ -5,7 +5,6 @@ from __future__ import annotations
 import base64
 import json
 import secrets
-import sqlite3
 import time
 import uuid
 from datetime import datetime, timezone
@@ -23,8 +22,13 @@ from bac.core.anchor import (
 from bac.core.canonicalize import canonical_bytes, canonical_json
 from bac.core.hash_chain import hash_json
 from server.app.core.config import load_settings
-from server.app.db.session import connect
+from server.app.db.session import DatabaseIntegrityError, connect
 from server.app.signing.keys import load_signing_key
+
+try:
+    import redis
+except ImportError:  # pragma: no cover - exercised when server extras are not installed.
+    redis = None
 
 
 def create_app() -> FastAPI:
@@ -32,7 +36,7 @@ def create_app() -> FastAPI:
     signing_key = load_signing_key(settings)
     db = connect(settings.db_url)
     lock = Lock()
-    rate_limiter = _RateLimiter(settings.rate_limit_per_minute)
+    rate_limiter = build_rate_limiter(settings)
     _ensure_signing_key(db, signing_key.key_id, signing_key.public_key_b64)
 
     app = FastAPI(title="BAC Anchor Server", version="0.1.0")
@@ -114,7 +118,7 @@ def create_app() -> FastAPI:
                     ),
                 )
                 db.commit()
-            except sqlite3.IntegrityError:
+            except DatabaseIntegrityError:
                 db.rollback()
                 existing = _find_existing_anchor(db, payload["anchor_hash"], ledger_id, payload["sequence"])
                 if existing:
@@ -262,6 +266,31 @@ class _RateLimiter:
                 return False
             self._buckets[key] = (window, count + 1)
             return True
+
+
+class _RedisRateLimiter:
+    def __init__(self, redis_url: str, limit_per_minute: int) -> None:
+        if redis is None:
+            raise RuntimeError("Redis rate limiting requires installing the server extra dependencies")
+        self.limit = limit_per_minute
+        self.client = redis.Redis.from_url(redis_url, decode_responses=True)
+        self.client.ping()
+
+    def allow(self, key: str) -> bool:
+        if self.limit <= 0:
+            return True
+        window = int(time.monotonic() // 60)
+        redis_key = f"bac-anchor:rate-limit:{window}:{hash_json({'key': key})}"
+        count = int(self.client.incr(redis_key))
+        if count == 1:
+            self.client.expire(redis_key, 120)
+        return count <= self.limit
+
+
+def build_rate_limiter(settings: Any) -> Any:
+    if settings.redis_url:
+        return _RedisRateLimiter(settings.redis_url, settings.rate_limit_per_minute)
+    return _RateLimiter(settings.rate_limit_per_minute)
 
 
 class BodyLimitMiddleware:

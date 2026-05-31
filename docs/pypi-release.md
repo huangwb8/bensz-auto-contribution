@@ -1,6 +1,6 @@
 # PyPI 发布流程
 
-本项目使用 `pyproject.toml`、setuptools 和 GitHub Actions 发布 Python 包。默认采用 PyPI Trusted Publishing，不在仓库中保存 PyPI API token。
+本项目使用 `pyproject.toml`、setuptools 和 twine 发布 Python 包。默认推荐 GitHub Actions Trusted Publishing；需要从本地机器或自建发布机发布时，也支持基于本地 PyPI 配置直传，不在仓库中保存 PyPI API token。
 
 ## 前置条件
 
@@ -41,6 +41,19 @@ git push origin main --tags
 
 6. 基于该 tag 创建 GitHub Release。
 7. 发布 GitHub Release 后，`.github/workflows/publish-pypi.yml` 会构建包、检查元数据、上传构建产物并发布到 PyPI。
+
+## 本地发布
+
+当明确需要绕过 GitHub Actions 时，使用本地 PyPI 配置发布：
+
+```bash
+rm -rf dist
+python -m build
+python -m twine check dist/*
+python -m twine upload dist/*
+```
+
+`twine upload` 默认读取 `~/.pypirc`、keyring 或 `TWINE_USERNAME`/`TWINE_PASSWORD` 等本地配置。不要把 PyPI token 写入仓库、命令历史或发布文档。
 
 ## 手动触发
 

@@ -123,6 +123,16 @@ bac verify
 bac inspect
 ```
 
+提取人类贡献，并可按日期过滤：
+
+```bash
+bac inspect --human
+bac inspect --human --on 2026-05-31
+bac inspect --source-type human --since 2026-05-01 --until 2026-05-31 --json
+```
+
+日期形式的 `--since`、`--until` 和 `--on` 按 UTC 自然日解释。`--until 2026-05-31` 会包含该 UTC 日期结束前的事件；如需精确边界，可传 ISO-8601 时间戳。
+
 所有命令都支持 `--root` 指定目标项目根目录，支持 `--bac-file` 指定自定义 `.bac` 路径。`init`、`record`、`verify`、`inspect` 均支持 `--json` 输出，便于 AI tool 或其它自动化流程调用。
 
 ### 隐私保护锚定流程

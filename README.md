@@ -123,6 +123,16 @@ Inspect the contribution timeline:
 bac inspect
 ```
 
+Extract human contributions, optionally by date:
+
+```bash
+bac inspect --human
+bac inspect --human --on 2026-05-31
+bac inspect --source-type human --since 2026-05-01 --until 2026-05-31 --json
+```
+
+Date-only `--since`, `--until`, and `--on` values are interpreted as UTC calendar dates. `--until 2026-05-31` includes events through the end of that UTC date; pass an ISO-8601 timestamp for an exact boundary.
+
 All commands support `--root` for the target project root and `--bac-file` for a custom `.bac` path. `init`, `record`, `verify`, and `inspect` also support `--json` for machine-readable output.
 
 ### Private Anchor Workflow

@@ -18,6 +18,7 @@ from bac.core.container import EVENT_PATH_TEMPLATE, MANIFEST_PATH, event_path
 from bac.core.hash_chain import attach_event_hash, compute_event_hash
 from bac.core.schema import FORMAT_VERSION
 from bac.core.verify import verify_bac_file
+from bac.report.inspect import timeline
 from bac.service.event_builder import build_genesis_event, build_record_event
 from bac.service.redaction import redact_data
 from bac.storage.bac_file import append_event, initialize_bac_file, read_events
@@ -309,6 +310,36 @@ class BacCoreTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "uncompressed size exceeds limit"):
                     read_events(bac_file)
 
+    def test_timeline_filters_human_contributions_by_date(self) -> None:
+        events = [
+            _timeline_event("2026-05-30T23:59:59Z", "human_instruction", "human", "Previous request"),
+            _timeline_event("2026-05-31T00:00:00Z", "human_instruction", "human", "Morning request"),
+            _timeline_event("2026-05-31T12:00:00Z", "ai_generation", "ai", "AI implementation"),
+            _timeline_event("2026-05-31T23:59:59Z", "human_review", "human", "Review feedback"),
+            _timeline_event("2026-06-01T00:00:00Z", "human_approval", "human", "Next day approval"),
+        ]
+
+        items = timeline(events, source_type="human", on="2026-05-31")
+
+        self.assertEqual([item["summary"] for item in items], ["Morning request", "Review feedback"])
+
+    def test_timeline_filters_source_and_time_range_before_limit(self) -> None:
+        events = [
+            _timeline_event("2026-05-30T10:00:00Z", "human_instruction", "human", "First"),
+            _timeline_event("2026-05-31T10:00:00Z", "human_review", "human", "Second"),
+            _timeline_event("2026-06-01T10:00:00Z", "human_approval", "human", "Third"),
+            _timeline_event("2026-06-01T11:00:00Z", "ai_generation", "ai", "AI item"),
+        ]
+
+        items = timeline(events, limit=1, source_type="human", since="2026-05-31", until="2026-06-01")
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["summary"], "Third")
+
+    def test_timeline_rejects_conflicting_date_filters(self) -> None:
+        with self.assertRaisesRegex(ValueError, "--on cannot be combined"):
+            timeline([], on="2026-05-31", since="2026-05-01")
+
     def test_cli_e2e(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -346,6 +377,42 @@ class BacCoreTests(unittest.TestCase):
                 env=env,
             )
             self.assertEqual(record_result.returncode, 0, record_result.stderr)
+
+            human_result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "bac",
+                    "--root",
+                    str(root),
+                    "record",
+                    "--event-type",
+                    "human_instruction",
+                    "--source-type",
+                    "human",
+                    "--summary",
+                    "Human requirement",
+                    "--json",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            self.assertEqual(human_result.returncode, 0, human_result.stderr)
+
+            inspect_result = subprocess.run(
+                [sys.executable, "-m", "bac", "--root", str(root), "inspect", "--human", "--json"],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            self.assertEqual(inspect_result.returncode, 0, inspect_result.stderr)
+            human_items = json.loads(inspect_result.stdout)
+            self.assertEqual(len(human_items), 1)
+            self.assertEqual(human_items[0]["summary"], "Human requirement")
+            self.assertEqual(human_items[0]["source_type"], "human")
 
             verify_result = subprocess.run(
                 [sys.executable, "-m", "bac", "--root", str(root), "verify", "--json"],
@@ -394,6 +461,17 @@ def _minimal_manifest(genesis: dict) -> dict:
         "project": genesis["project"],
         "genesis_event_hash": genesis["event_hash"],
         "storage": {"kind": "zip", "event_path_template": EVENT_PATH_TEMPLATE},
+    }
+
+
+def _timeline_event(created_at: str, event_type: str, source_type: str, summary: str) -> dict:
+    return {
+        "created_at": created_at,
+        "event_type": event_type,
+        "source_type": source_type,
+        "trust_level": "declared",
+        "payload": {"summary": summary},
+        "event_hash": "sha256:" + "0" * 64,
     }
 
 
