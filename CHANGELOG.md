@@ -4,9 +4,21 @@
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-05-31
+
 ### Added（新增）
 
 - 新增 DockerHub 本地直推发布流程：提供 `tools/dockerhub-publish.sh` 与 `make dockerhub-publish`，仅构建并发布 `linux/amd64` 镜像，不经过 GitHub Actions；同步补充发布文档、README 入口和服务端说明。
+
+### Changed（变更）
+
+- 优化项目指令的计划文档语言规则：要求生成或维护 `docs/plans/` 计划时使用用户默认语言，并将现有计划文档正文统一翻译为简体中文。
+
+### Fixed（修复）
+
+- 加固 BAC 信任等级验证：拒绝伪造的 `signed` 与无有效 receipt 的 `anchored`，并让 `anchor.require` 配置在 `bac verify` 中默认生效。
+- 加固 `.bac` 读取边界：对容器总大小、事件数量和单个 JSON 成员解压大小设置上限，降低恶意 ZIP/JSON 输入导致资源耗尽的风险。
+- 加固锚定客户端和 reference server：`anchor push` 默认拒绝不安全 URL 和解析到内网的域名，支持通过参数或环境变量发送生产写入 token；生产模式要求 token 保护写入、管理页面和账本查询，并增加请求体限制、速率限制、旧 SQLite 迁移和 `ledger_id = null` 幂等处理。
 
 ## [1.2.0] - 2026-05-30
 
