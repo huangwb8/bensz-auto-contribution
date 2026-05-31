@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 from zipfile import BadZipFile, ZipFile
 
+from bac.core import container
 from bac.core.anchor import compute_anchor_hash, verify_anchor_receipt
 from bac.core.container import (
     CONTAINER_FORMAT_VERSION,
@@ -47,6 +48,11 @@ class VerificationReport:
 def verify_bac_file(path: Path, require_anchor: bool = False) -> VerificationReport:
     if not path.exists():
         return VerificationReport(status="fail", errors=[f"BAC file does not exist: {path}"])
+    if path.stat().st_size > container.MAX_BAC_BYTES:
+        return VerificationReport(
+            status="fail",
+            errors=[f"BAC file exceeds maximum size of {container.MAX_BAC_BYTES} bytes: {path}"],
+        )
 
     events: list[Any] = []
     errors: list[str] = []
@@ -68,6 +74,11 @@ def verify_bac_file(path: Path, require_anchor: bool = False) -> VerificationRep
                 for name in names
                 if (sequence := event_sequence(name)) is not None
             )
+            if len(event_members) > container.MAX_EVENT_COUNT:
+                errors.append(
+                    f"container has too many event members: {len(event_members)} > {container.MAX_EVENT_COUNT}"
+                )
+                event_members = []
             errors.extend(_validate_event_sequences([sequence for sequence, _name in event_members]))
             for _sequence, name in event_members:
                 events.append(_read_json_member(archive, name, errors))
@@ -140,10 +151,14 @@ def verify_events(events: list[Any], require_anchor: bool = False) -> Verificati
                 previous_created_at = parsed_created_at
 
         signature = event.get("signature")
-        if signature is not None:
+        if event.get("trust_level") == "signed":
+            signed_count += 1
+            errors.append(f"event {event_id}: signed trust_level requires a valid signature")
+        elif signature is not None:
             signed_count += 1
             errors.append(f"event {event_id}: signature verification is not supported yet")
 
+        anchor_valid = False
         if event.get("event_type") == "checkpoint":
             checkpoint_count += 1
             payload = event.get("payload", {})
@@ -159,11 +174,17 @@ def verify_events(events: list[Any], require_anchor: bool = False) -> Verificati
                     anchored_head_hashes,
                     errors,
                 ):
+                    anchor_valid = True
                     valid_receipt_count += 1
                 else:
                     invalid_receipt_count += 1
             else:
                 local_checkpoint_count += 1
+        elif event.get("trust_level") == "anchored":
+            errors.append(f"event {event_id}: anchored trust_level is only valid on checkpoint events")
+
+        if event.get("trust_level") == "anchored" and not anchor_valid:
+            errors.append(f"event {event_id}: anchored trust_level requires a valid remote anchor receipt")
 
         previous_hash = event.get("event_hash")
 
@@ -245,6 +266,16 @@ def _status(errors: list[str], warnings: list[str]) -> str:
 
 
 def _read_json_member(archive: ZipFile, name: str, errors: list[str]) -> Any:
+    try:
+        info = archive.getinfo(name)
+    except KeyError:
+        errors.append(f"{name}: container member is missing")
+        return None
+    if info.file_size > container.MAX_MEMBER_UNCOMPRESSED_BYTES:
+        errors.append(
+            f"{name}: uncompressed size exceeds limit of {container.MAX_MEMBER_UNCOMPRESSED_BYTES} bytes"
+        )
+        return None
     try:
         return json.loads(archive.read(name).decode("utf-8"))
     except UnicodeDecodeError:

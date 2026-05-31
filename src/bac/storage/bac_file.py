@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 from zipfile import BadZipFile, ZipFile
 
+from bac.core import container
 from bac.core.canonicalize import canonical_json
 from bac.core.container import (
     MANIFEST_PATH,
@@ -26,6 +27,8 @@ def read_events(path: Path) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     if not path.exists():
         return events
+    if path.stat().st_size > container.MAX_BAC_BYTES:
+        raise ValueError(f"BAC file exceeds maximum size of {container.MAX_BAC_BYTES} bytes: {path}")
     try:
         with ZipFile(path, "r") as archive:
             names = archive.namelist()
@@ -38,9 +41,19 @@ def read_events(path: Path) -> list[dict[str, Any]]:
                 for name in names
                 if event_sequence(name) is not None
             )
+            if len(event_members) > container.MAX_EVENT_COUNT:
+                raise ValueError(
+                    f"BAC container has too many event members: {len(event_members)} > {container.MAX_EVENT_COUNT}"
+                )
             for sequence, name in event_members:
                 if sequence is None:
                     continue
+                info = archive.getinfo(name)
+                if info.file_size > container.MAX_MEMBER_UNCOMPRESSED_BYTES:
+                    raise ValueError(
+                        f"{name}: uncompressed size exceeds limit of "
+                        f"{container.MAX_MEMBER_UNCOMPRESSED_BYTES} bytes"
+                    )
                 try:
                     events.append(json.loads(archive.read(name).decode("utf-8")))
                 except UnicodeDecodeError as exc:

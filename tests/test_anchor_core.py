@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -21,6 +22,7 @@ from bac.core.anchor import (
 )
 from bac.core.canonicalize import canonical_bytes
 from bac.core.verify import verify_bac_file
+from bac.adapters import cli
 from bac.service.event_builder import build_anchor_checkpoint_event, build_genesis_event, build_record_event
 from bac.storage.bac_file import append_event, initialize_bac_file
 
@@ -165,6 +167,110 @@ class AnchorCoreTests(unittest.TestCase):
             self.assertEqual(report["status"], "pass", report["errors"])
             self.assertEqual(report["anchor_status"], "receipt_valid")
             self.assertEqual(head_hash, report["anchored_head_hashes"][-1])
+
+    def test_cli_verify_enforces_anchor_require_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = dict(os.environ)
+            env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1] / "src")
+            _run_cli(root, env, "init", "--mode", "hybrid", "--json")
+            _run_cli(root, env, "record", "--event-type", "checkpoint", "--source-type", "system", "--summary", "Local checkpoint")
+            _run_cli(root, env, "config", "set", "anchor.require", "true", "--json")
+
+            verify = subprocess.run(
+                [sys.executable, "-m", "bac", "--root", str(root), "verify", "--json"],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+
+            self.assertEqual(verify.returncode, 1, verify.stdout)
+            report = json.loads(verify.stdout)
+            self.assertEqual(report["status"], "fail")
+            self.assertTrue(any("valid remote anchor receipt is required" in error for error in report["errors"]))
+
+    def test_cli_record_rejects_reserved_trust_levels(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = dict(os.environ)
+            env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1] / "src")
+            _run_cli(root, env, "init", "--json")
+
+            for trust_level in ("signed", "anchored"):
+                result = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "bac",
+                        "--root",
+                        str(root),
+                        "record",
+                        "--event-type",
+                        "human_instruction",
+                        "--source-type",
+                        "human",
+                        "--trust-level",
+                        trust_level,
+                        "--summary",
+                        "Reserved trust level",
+                    ],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                )
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("reserved", result.stderr)
+
+    def test_anchor_push_url_policy_rejects_unsafe_urls_by_default(self) -> None:
+        unsafe_urls = [
+            "http://127.0.0.1:8080",
+            "http://169.254.169.254/latest/meta-data",
+            "https://10.0.0.5",
+            "ftp://example.com",
+        ]
+
+        for url in unsafe_urls:
+            with self.subTest(url=url):
+                with self.assertRaisesRegex(ValueError, "unsafe anchor.url"):
+                    cli._validate_anchor_push_url(url, allow_insecure=False)
+
+    def test_anchor_push_url_policy_allows_explicit_local_development_override(self) -> None:
+        cli._validate_anchor_push_url("http://127.0.0.1:8080", allow_insecure=True)
+
+    def test_anchor_push_url_policy_rejects_hostnames_resolving_to_private_addresses(self) -> None:
+        with patch("bac.adapters.cli.socket.getaddrinfo") as getaddrinfo:
+            getaddrinfo.return_value = [
+                (cli.socket.AF_INET, cli.socket.SOCK_STREAM, 6, "", ("10.0.0.5", 443)),
+            ]
+
+            with self.assertRaisesRegex(ValueError, "hostname resolves"):
+                cli._validate_anchor_push_url("https://anchor.example", allow_insecure=False)
+
+    def test_post_anchor_request_sends_bearer_token_without_persisting_it(self) -> None:
+        captured = {}
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self) -> bytes:
+                return b'{"ok":true}'
+
+        def fake_urlopen(request, timeout):
+            captured["authorization"] = request.get_header("Authorization")
+            captured["timeout"] = timeout
+            return Response()
+
+        with patch("bac.adapters.cli.urllib.request.urlopen", fake_urlopen):
+            payload = cli._post_anchor_request("https://anchor.example", {"format": "x"}, token="secret-token")
+
+        self.assertEqual(payload, {"ok": True})
+        self.assertEqual(captured["authorization"], "Bearer secret-token")
 
 
 def _signed_receipt(private_key: Ed25519PrivateKey, anchor_hash: str) -> dict:

@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import base64
 import json
+import secrets
+import sqlite3
+import time
 import uuid
 from datetime import datetime, timezone
 from threading import Lock
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from bac.core.anchor import (
     SERVICE_NAME,
@@ -29,9 +32,11 @@ def create_app() -> FastAPI:
     signing_key = load_signing_key(settings)
     db = connect(settings.db_url)
     lock = Lock()
+    rate_limiter = _RateLimiter(settings.rate_limit_per_minute)
     _ensure_signing_key(db, signing_key.key_id, signing_key.public_key_b64)
 
     app = FastAPI(title="BAC Anchor Server", version="0.1.0")
+    app.add_middleware(BodyLimitMiddleware, max_body_bytes=settings.max_body_bytes)
     app.state.db = db
     app.state.lock = lock
     app.state.signing_key = signing_key
@@ -69,49 +74,52 @@ def create_app() -> FastAPI:
 
     @app.post("/api/v1/anchors")
     async def create_anchor(request: Request) -> dict[str, Any]:
-        if int(request.headers.get("content-length", "0") or "0") > 8192:
-            raise HTTPException(status_code=413, detail="request body is too large")
+        _require_token(request, settings, settings.api_token, "api")
+        if _is_production(settings) and not rate_limiter.allow(_rate_limit_key(request)):
+            raise HTTPException(status_code=429, detail={"code": "rate_limited"})
         payload = await request.json()
         errors = validate_anchor_request(payload)
         if errors:
             raise HTTPException(status_code=422, detail={"code": "invalid_anchor_request", "errors": errors})
+        ledger_id = payload.get("ledger_id") or ""
         with lock:
-            existing = db.execute(
-                """
-                SELECT receipt_json FROM anchors
-                WHERE anchor_hash = ? AND COALESCE(ledger_id, '') = COALESCE(?, '') AND client_sequence = ?
-                """,
-                (payload["anchor_hash"], payload.get("ledger_id"), payload["sequence"]),
-            ).fetchone()
+            existing = _find_existing_anchor(db, payload["anchor_hash"], ledger_id, payload["sequence"])
             if existing:
                 return json.loads(existing["receipt_json"])
 
             server_sequence = _next_server_sequence(db)
             receipt = _sign_receipt(payload, server_sequence)
-            db.execute(
-                """
-                INSERT INTO anchors (
-                  receipt_id, anchor_hash, ledger_id, client_sequence, server_sequence,
-                  client_created_at, server_created_at, key_id, signature_alg,
-                  signature_b64, request_hash, receipt_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    receipt["receipt_id"],
-                    receipt["anchor_hash"],
-                    payload.get("ledger_id"),
-                    payload["sequence"],
-                    receipt["server_sequence"],
-                    payload["client_created_at"],
-                    receipt["server_created_at"],
-                    receipt["key_id"],
-                    receipt["signature_alg"],
-                    receipt["signature"],
-                    hash_json(payload),
-                    canonical_json(receipt),
-                ),
-            )
-            db.commit()
+            try:
+                db.execute(
+                    """
+                    INSERT INTO anchors (
+                      receipt_id, anchor_hash, ledger_id, client_sequence, server_sequence,
+                      client_created_at, server_created_at, key_id, signature_alg,
+                      signature_b64, request_hash, receipt_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        receipt["receipt_id"],
+                        receipt["anchor_hash"],
+                        ledger_id,
+                        payload["sequence"],
+                        receipt["server_sequence"],
+                        payload["client_created_at"],
+                        receipt["server_created_at"],
+                        receipt["key_id"],
+                        receipt["signature_alg"],
+                        receipt["signature"],
+                        hash_json(payload),
+                        canonical_json(receipt),
+                    ),
+                )
+                db.commit()
+            except sqlite3.IntegrityError:
+                db.rollback()
+                existing = _find_existing_anchor(db, payload["anchor_hash"], ledger_id, payload["sequence"])
+                if existing:
+                    return json.loads(existing["receipt_json"])
+                raise
             return receipt
 
     @app.get("/api/v1/receipts/{receipt_id}")
@@ -122,7 +130,10 @@ def create_app() -> FastAPI:
         return json.loads(row["receipt_json"])
 
     @app.get("/api/v1/ledgers/{ledger_id}/receipts")
-    def ledger_receipts(ledger_id: str) -> dict[str, Any]:
+    def ledger_receipts(ledger_id: str, request: Request) -> dict[str, Any]:
+        if not settings.enable_ledger_query:
+            raise HTTPException(status_code=404, detail={"code": "not_found"})
+        _require_token(request, settings, settings.api_token, "api")
         if not ledger_id or len(ledger_id) > 128:
             raise HTTPException(status_code=422, detail={"code": "invalid_ledger_id"})
         rows = db.execute(
@@ -132,7 +143,10 @@ def create_app() -> FastAPI:
         return {"format": "bac.anchor.ledger_receipts.v1", "ledger_id": ledger_id, "receipts": [json.loads(row["receipt_json"]) for row in rows]}
 
     @app.get("/admin", response_class=HTMLResponse)
-    def admin() -> str:
+    def admin(request: Request) -> str:
+        if _is_production(settings) and not settings.admin_token:
+            raise HTTPException(status_code=404, detail={"code": "not_found"})
+        _require_token(request, settings, settings.admin_token, "admin")
         count = db.execute("SELECT COUNT(*) AS count FROM anchors").fetchone()["count"]
         last = db.execute("SELECT server_created_at FROM anchors ORDER BY server_sequence DESC LIMIT 1").fetchone()
         recent = last["server_created_at"] if last else "none"
@@ -189,6 +203,101 @@ def _ensure_signing_key(db: Any, key_id: str, public_key_b64: str) -> None:
 def _next_server_sequence(db: Any) -> int:
     row = db.execute("SELECT COALESCE(MAX(server_sequence), 0) + 1 AS next_sequence FROM anchors").fetchone()
     return int(row["next_sequence"])
+
+
+def _find_existing_anchor(db: Any, anchor_hash: str, ledger_id: str, sequence: int) -> Any:
+    return db.execute(
+        """
+        SELECT receipt_json FROM anchors
+        WHERE anchor_hash = ? AND ledger_id = ? AND client_sequence = ?
+        """,
+        (anchor_hash, ledger_id, sequence),
+    ).fetchone()
+
+
+def _is_production(settings: Any) -> bool:
+    return settings.env == "production"
+
+
+def _require_token(request: Request, settings: Any, expected: str | None, label: str) -> None:
+    if not _is_production(settings):
+        return
+    if not expected:
+        raise HTTPException(status_code=503, detail={"code": f"{label}_token_not_configured"})
+    authorization = request.headers.get("authorization", "")
+    prefix = "Bearer "
+    if not authorization.startswith(prefix):
+        raise HTTPException(status_code=401, detail={"code": "authentication_required"})
+    provided = authorization[len(prefix) :]
+    if not secrets.compare_digest(provided, expected):
+        raise HTTPException(status_code=403, detail={"code": "forbidden"})
+
+
+def _rate_limit_key(request: Request) -> str:
+    authorization = request.headers.get("authorization")
+    if authorization:
+        return authorization
+    if request.client:
+        return request.client.host
+    return "unknown"
+
+
+class _RateLimiter:
+    def __init__(self, limit_per_minute: int) -> None:
+        self.limit = limit_per_minute
+        self._lock = Lock()
+        self._buckets: dict[str, tuple[float, int]] = {}
+
+    def allow(self, key: str) -> bool:
+        if self.limit <= 0:
+            return True
+        now = time.monotonic()
+        window = int(now // 60)
+        with self._lock:
+            _started_at, count = self._buckets.get(key, (window, 0))
+            if _started_at != window:
+                self._buckets[key] = (window, 1)
+                return True
+            if count >= self.limit:
+                return False
+            self._buckets[key] = (window, count + 1)
+            return True
+
+
+class BodyLimitMiddleware:
+    def __init__(self, app: Any, max_body_bytes: int) -> None:
+        self.app = app
+        self.max_body_bytes = max_body_bytes
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if scope.get("type") != "http" or scope.get("method") not in {"POST", "PUT", "PATCH"}:
+            await self.app(scope, receive, send)
+            return
+
+        body = bytearray()
+        more_body = True
+        while more_body:
+            message = await receive()
+            if message["type"] != "http.request":
+                continue
+            chunk = message.get("body", b"")
+            body.extend(chunk)
+            if len(body) > self.max_body_bytes:
+                response = JSONResponse({"detail": "request body is too large"}, status_code=413)
+                await response(scope, receive, send)
+                return
+            more_body = message.get("more_body", False)
+
+        sent = False
+
+        async def replay_receive() -> dict[str, Any]:
+            nonlocal sent
+            if sent:
+                return {"type": "http.request", "body": b"", "more_body": False}
+            sent = True
+            return {"type": "http.request", "body": bytes(body), "more_body": False}
+
+        await self.app(scope, replay_receive, send)
 
 
 app = create_app()

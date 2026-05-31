@@ -188,3 +188,7 @@ def _validate_builder_input(event_type: str, source_type: str, trust_level: str)
         raise ValueError(f"unsupported source_type: {source_type}")
     if trust_level not in TRUST_LEVELS:
         raise ValueError(f"unsupported trust_level: {trust_level}")
+    if trust_level == "signed":
+        raise ValueError("signed trust_level is not supported until event signatures are implemented")
+    if trust_level == "anchored" and event_type != "checkpoint":
+        raise ValueError("anchored trust_level is only supported for anchor checkpoint events")

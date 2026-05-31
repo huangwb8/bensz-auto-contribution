@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
+import os
+import socket
 import sys
 import urllib.error
 import urllib.request
+from urllib.parse import urlparse
 from pathlib import Path
 from secrets import token_hex
 from typing import Any
@@ -105,6 +109,15 @@ def build_parser() -> argparse.ArgumentParser:
     anchor_import.set_defaults(func=_cmd_anchor_import)
     anchor_push = anchor_subparsers.add_parser("push", help="submit the current head to the configured anchor service")
     anchor_push.add_argument("--public-key", help="base64 raw Ed25519 public key; fetched from service when omitted")
+    anchor_push.add_argument(
+        "--token",
+        help="bearer token for production anchor writes; defaults to BAC_ANCHOR_API_TOKEN",
+    )
+    anchor_push.add_argument(
+        "--allow-insecure-anchor-url",
+        action="store_true",
+        help="allow http/private anchor URLs for local development",
+    )
     anchor_push.add_argument("--json", action="store_true", help="print machine-readable output")
     anchor_push.set_defaults(func=_cmd_anchor_push)
 
@@ -134,6 +147,10 @@ def _cmd_record(args: argparse.Namespace) -> int:
     head_hash = current_head_hash(bac_path)
     if head_hash is None:
         raise FileNotFoundError(f"BAC file is empty or missing: {bac_path}")
+    if args.trust_level in {"signed", "anchored"}:
+        raise ValueError(
+            f"{args.trust_level} trust_level is reserved; use event signatures or bac anchor import/push"
+        )
 
     payload = _json_object(args.payload_json, "payload-json") if args.payload_json else {}
     evidence = _json_list(args.evidence_json, "evidence-json") if args.evidence_json else []
@@ -170,7 +187,14 @@ def _cmd_record(args: argparse.Namespace) -> int:
 
 def _cmd_verify(args: argparse.Namespace) -> int:
     root = Path(args.root).resolve()
-    report = verify_bac_file(_bac_path(root, args.bac_file), require_anchor=args.require_anchor)
+    bac_path = _bac_path(root, args.bac_file)
+    try:
+        events = read_events(bac_path)
+    except ValueError:
+        events = []
+    config = _bac_config(events)
+    effective_require_anchor = args.require_anchor or bool(config.get("anchor.require"))
+    report = verify_bac_file(bac_path, require_anchor=effective_require_anchor)
     if args.json:
         print(canonical_json(report.to_dict()))
     else:
@@ -273,9 +297,11 @@ def _cmd_anchor_push(args: argparse.Namespace) -> int:
     anchor_url = config.get("anchor.url")
     if not isinstance(anchor_url, str) or not anchor_url:
         raise ValueError("anchor.url is not configured; run bac config set anchor.url <url>")
+    _validate_anchor_push_url(anchor_url, allow_insecure=args.allow_insecure_anchor_url)
 
     request = _build_request_for_current_head(events)
-    receipt = _post_anchor_request(anchor_url, request)
+    token = args.token or os.getenv("BAC_ANCHOR_API_TOKEN")
+    receipt = _post_anchor_request(anchor_url, request, token=token)
     public_key = args.public_key or _fetch_public_key(anchor_url, receipt.get("key_id"))
     event = _append_anchor_checkpoint(root, bac_path, events, receipt, public_key)
     output = {"status": "anchored", "event_id": event["event_id"], "head_hash": event["event_hash"]}
@@ -390,12 +416,15 @@ def _read_json_file(path: Path, label: str) -> dict[str, Any]:
     return value
 
 
-def _post_anchor_request(anchor_url: str, request: dict[str, Any]) -> dict[str, Any]:
+def _post_anchor_request(anchor_url: str, request: dict[str, Any], token: str | None = None) -> dict[str, Any]:
     url = anchor_url.rstrip("/") + "/api/v1/anchors"
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     http_request = urllib.request.Request(
         url,
         data=canonical_json(request).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers=headers,
         method="POST",
     )
     try:
@@ -419,6 +448,54 @@ def _fetch_public_key(anchor_url: str, key_id: Any) -> str:
         if isinstance(item, dict) and item.get("key_id") == key_id and isinstance(item.get("public_key"), str):
             return item["public_key"]
     raise ValueError(f"anchor public key not found for key_id: {key_id}")
+
+
+def _validate_anchor_push_url(anchor_url: str, allow_insecure: bool = False) -> None:
+    parsed = urlparse(anchor_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("unsafe anchor.url: only http(s) URLs with a hostname are supported")
+    if allow_insecure:
+        return
+    if parsed.scheme != "https":
+        raise ValueError("unsafe anchor.url: https is required unless --allow-insecure-anchor-url is set")
+
+    hostname = parsed.hostname
+    if hostname.lower() == "localhost":
+        raise ValueError("unsafe anchor.url: local hostnames are not allowed by default")
+    try:
+        address = ipaddress.ip_address(hostname)
+    except ValueError:
+        for resolved in _resolve_host_addresses(hostname, parsed.port):
+            if _is_unsafe_address(resolved):
+                raise ValueError("unsafe anchor.url: hostname resolves to a private, local, reserved, or multicast address")
+        return
+    if _is_unsafe_address(address):
+        raise ValueError("unsafe anchor.url: private, local, reserved, or multicast addresses are not allowed")
+
+
+def _resolve_host_addresses(hostname: str, port: int | None) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+    try:
+        infos = socket.getaddrinfo(hostname, port or 443, type=socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        raise ValueError(f"unsafe anchor.url: hostname could not be resolved: {hostname}") from exc
+    addresses = []
+    for family, _type, _proto, _canonname, sockaddr in infos:
+        if family in {socket.AF_INET, socket.AF_INET6}:
+            addresses.append(ipaddress.ip_address(sockaddr[0]))
+    if not addresses:
+        raise ValueError(f"unsafe anchor.url: hostname did not resolve to an IP address: {hostname}")
+    return addresses
+
+
+def _is_unsafe_address(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    return (
+        address.is_loopback
+        or address.is_link_local
+        or address.is_private
+        or address.is_multicast
+        or address.is_reserved
+        or address.is_unspecified
+    )
 
 
 def _json_response(raw: bytes, label: str) -> dict[str, Any]:

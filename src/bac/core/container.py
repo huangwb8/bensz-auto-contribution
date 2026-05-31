@@ -14,6 +14,9 @@ EVENTS_DIR = "events"
 EVENT_PATH_RE = re.compile(r"^events/(\d{12})\.json$")
 EVENT_PATH_TEMPLATE = "events/{sequence:012d}.json"
 ZIP_COMPRESSION = ZIP_DEFLATED
+MAX_BAC_BYTES = 50 * 1024 * 1024
+MAX_EVENT_COUNT = 100_000
+MAX_MEMBER_UNCOMPRESSED_BYTES = 2 * 1024 * 1024
 
 
 def event_path(sequence: int) -> str:

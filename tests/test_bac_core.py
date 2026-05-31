@@ -8,6 +8,7 @@ import tempfile
 import unittest
 import warnings
 from pathlib import Path
+from unittest.mock import patch
 from zipfile import ZipFile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -186,6 +187,127 @@ class BacCoreTests(unittest.TestCase):
             report = verify_bac_file(bac_file)
             self.assertEqual(report.status, "fail")
             self.assertTrue(any("contiguous" in error for error in report.errors))
+
+    def test_verify_rejects_signed_trust_without_verified_signature(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bac_file = root / "project.bac"
+            genesis = build_genesis_event(root)
+            initialize_bac_file(bac_file, genesis)
+            signed = build_record_event(
+                root=root,
+                prev_event_hash=genesis["event_hash"],
+                event_type="human_instruction",
+                source_type="human",
+                summary="Forged signed event",
+            )
+            signed["trust_level"] = "signed"
+            signed = attach_event_hash(signed)
+            append_event(bac_file, signed)
+
+            report = verify_bac_file(bac_file)
+
+            self.assertEqual(report.status, "fail")
+            self.assertTrue(any("signed trust_level requires a valid signature" in error for error in report.errors))
+
+    def test_verify_rejects_anchored_trust_on_non_checkpoint_event(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bac_file = root / "project.bac"
+            genesis = build_genesis_event(root)
+            initialize_bac_file(bac_file, genesis)
+            anchored = build_record_event(
+                root=root,
+                prev_event_hash=genesis["event_hash"],
+                event_type="ai_generation",
+                source_type="ai",
+                summary="Forged anchored event",
+            )
+            anchored["trust_level"] = "anchored"
+            anchored = attach_event_hash(anchored)
+            append_event(bac_file, anchored)
+
+            report = verify_bac_file(bac_file)
+
+            self.assertEqual(report.status, "fail")
+            self.assertTrue(any("anchored trust_level is only valid on checkpoint events" in error for error in report.errors))
+
+    def test_verify_rejects_anchored_checkpoint_without_valid_receipt(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bac_file = root / "project.bac"
+            genesis = build_genesis_event(root)
+            initialize_bac_file(bac_file, genesis)
+            checkpoint = build_record_event(
+                root=root,
+                prev_event_hash=genesis["event_hash"],
+                event_type="checkpoint",
+                source_type="system",
+                summary="Forged anchored checkpoint",
+            )
+            checkpoint["trust_level"] = "anchored"
+            checkpoint = attach_event_hash(checkpoint)
+            append_event(bac_file, checkpoint)
+
+            report = verify_bac_file(bac_file)
+
+            self.assertEqual(report.status, "fail")
+            self.assertTrue(any("anchored trust_level requires a valid remote anchor receipt" in error for error in report.errors))
+
+    def test_builder_rejects_unimplemented_signed_trust_level(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            genesis = build_genesis_event(root)
+
+            with self.assertRaisesRegex(ValueError, "signed trust_level is not supported"):
+                build_record_event(
+                    root=root,
+                    prev_event_hash=genesis["event_hash"],
+                    event_type="human_instruction",
+                    source_type="human",
+                    summary="Claim a signature",
+                    trust_level="signed",
+                )
+
+    def test_reading_rejects_oversized_bac_container(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            bac_file = Path(tmp) / "project.bac"
+            bac_file.write_text("not a zip", encoding="utf-8")
+
+            with patch("bac.core.container.MAX_BAC_BYTES", 2):
+                report = verify_bac_file(bac_file)
+                self.assertEqual(report.status, "fail")
+                self.assertTrue(any("exceeds maximum size" in error for error in report.errors))
+                with self.assertRaisesRegex(ValueError, "exceeds maximum size"):
+                    read_events(bac_file)
+
+    def test_reading_rejects_too_many_event_members(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bac_file = root / "project.bac"
+            genesis = build_genesis_event(root)
+            initialize_bac_file(bac_file, genesis)
+
+            with patch("bac.core.container.MAX_EVENT_COUNT", 0):
+                report = verify_bac_file(bac_file)
+                self.assertEqual(report.status, "fail")
+                self.assertTrue(any("too many event members" in error for error in report.errors))
+                with self.assertRaisesRegex(ValueError, "too many event members"):
+                    read_events(bac_file)
+
+    def test_reading_rejects_oversized_json_member(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bac_file = root / "project.bac"
+            genesis = build_genesis_event(root)
+            initialize_bac_file(bac_file, genesis)
+
+            with patch("bac.core.container.MAX_MEMBER_UNCOMPRESSED_BYTES", 8):
+                report = verify_bac_file(bac_file)
+                self.assertEqual(report.status, "fail")
+                self.assertTrue(any("uncompressed size exceeds limit" in error for error in report.errors))
+                with self.assertRaisesRegex(ValueError, "uncompressed size exceeds limit"):
+                    read_events(bac_file)
 
     def test_cli_e2e(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
