@@ -95,6 +95,78 @@ class AnchorApiTests(unittest.TestCase):
             self.assertEqual(wrong_token.status_code, 403)
             self.assertEqual(authenticated.status_code, 200, authenticated.text)
 
+    def test_cloud_register_login_create_ledger_and_anchor_with_user_token(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            app = _fresh_app(
+                Path(tmp) / "anchor.sqlite3",
+                env="production",
+                admin_token="admin-token",
+            )
+            client = TestClient(app)
+
+            registered = client.post(
+                "/api/v1/auth/register",
+                json={"email": "User@Example.com", "password": "correct horse battery staple"},
+            )
+            self.assertEqual(registered.status_code, 200, registered.text)
+            token = registered.json()["token"]
+
+            logged_in = client.post(
+                "/api/v1/auth/login",
+                json={"email": "user@example.com", "password": "correct horse battery staple"},
+            )
+            self.assertEqual(logged_in.status_code, 200, logged_in.text)
+            self.assertNotEqual(logged_in.json()["token"], token)
+
+            ledger = client.post(
+                "/api/v1/cloud/ledgers",
+                json={"display_name": "demo project"},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            self.assertEqual(ledger.status_code, 200, ledger.text)
+            ledger_id = ledger.json()["ledger_id"]
+
+            request = _anchor_request(ledger_id=ledger_id)
+            request["client_summary"] = {"event_count": 2, "source_counts": {"human": 1, "ai": 1}}
+            anchored = client.post(
+                "/api/v1/anchors",
+                json=request,
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            self.assertEqual(anchored.status_code, 200, anchored.text)
+
+            me = client.get("/api/v1/cloud/me", headers={"Authorization": f"Bearer {token}"})
+            self.assertEqual(me.status_code, 200, me.text)
+            self.assertEqual(me.json()["ledgers"][0]["ledger_id"], ledger_id)
+            self.assertEqual(me.json()["ledgers"][0]["last_sequence"], 1)
+
+    def test_user_token_cannot_anchor_to_another_users_ledger(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            app = _fresh_app(
+                Path(tmp) / "anchor.sqlite3",
+                env="production",
+                admin_token="admin-token",
+            )
+            client = TestClient(app)
+
+            first = client.post("/api/v1/auth/register", json={"email": "a@example.com", "password": "password-123"})
+            second = client.post("/api/v1/auth/register", json={"email": "b@example.com", "password": "password-456"})
+            first_token = first.json()["token"]
+            second_token = second.json()["token"]
+            ledger = client.post(
+                "/api/v1/cloud/ledgers",
+                json={"display_name": "private"},
+                headers={"Authorization": f"Bearer {first_token}"},
+            )
+
+            response = client.post(
+                "/api/v1/anchors",
+                json=_anchor_request(ledger_id=ledger.json()["ledger_id"]),
+                headers={"Authorization": f"Bearer {second_token}"},
+            )
+
+            self.assertEqual(response.status_code, 403)
+
     def test_production_restricts_admin_to_admin_token(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             app = _fresh_app(

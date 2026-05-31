@@ -159,6 +159,17 @@ bac anchor push --allow-insecure-anchor-url
 
 `bac anchor push` allows only safe `https://` public URLs by default, including DNS resolution checks for private and local addresses. The explicit insecure flag is intended for local development only. For production anchor servers that require a write token, pass `--token` or set `BAC_ANCHOR_API_TOKEN`; BAC does not write that token into `.bac`.
 
+For a user-facing BAC Cloud flow, users can register or log in, store a local token outside `.bac`, and bind a project ledger:
+
+```bash
+bac cloud register --url https://bac.example.com --email user@example.com
+bac cloud login --url https://bac.example.com --email user@example.com
+bac cloud link --url https://bac.example.com --ledger-name my-project
+bac cloud status
+```
+
+`bac cloud link` creates a server-side ledger, enables `anchor.require` plus automatic anchoring, and immediately anchors the newly linked ledger head. Future `bac record` calls still write the local `.bac` file, then submit a blinded `anchor_hash` and low-sensitivity `client_summary` to the configured service. The service returns a signed receipt that is appended locally as an anchored checkpoint.
+
 The optional reference service lives in `server/` and can be started with:
 
 ```bash

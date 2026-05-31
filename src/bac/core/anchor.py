@@ -25,6 +25,7 @@ REQUEST_FIELDS = {
     "ledger_public_key",
     "ledger_id",
     "sequence",
+    "client_summary",
 }
 FORBIDDEN_REQUEST_FIELDS = {
     "actor",
@@ -83,6 +84,7 @@ def build_anchor_request(
     ledger_id: str | None = None,
     ledger_public_key: str | None = None,
     client_created_at: str | None = None,
+    client_summary: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     request = {
         "format": ANCHOR_REQUEST_FORMAT,
@@ -91,6 +93,7 @@ def build_anchor_request(
         "ledger_public_key": ledger_public_key,
         "ledger_id": ledger_id,
         "sequence": sequence,
+        "client_summary": client_summary,
     }
     errors = validate_anchor_request(request)
     if errors:
@@ -116,6 +119,7 @@ def validate_anchor_request(request: Any) -> list[str]:
     _validate_optional_identifier(request.get("ledger_id"), "ledger_id", 128, errors)
     _validate_optional_public_key(request.get("ledger_public_key"), "ledger_public_key", errors)
     _validate_sequence(request.get("sequence"), "sequence", errors)
+    _validate_client_summary(request.get("client_summary"), errors)
     return errors
 
 
@@ -233,6 +237,21 @@ def _validate_optional_public_key(value: Any, label: str, errors: list[str]) -> 
 def _validate_sequence(value: Any, label: str, errors: list[str]) -> None:
     if not isinstance(value, int) or isinstance(value, bool) or value < 0 or value > 2**63 - 1:
         errors.append(f"{label} must be an integer between 0 and 2^63-1")
+
+
+def _validate_client_summary(value: Any, errors: list[str]) -> None:
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        errors.append("client_summary must be null or an object")
+        return
+    encoded_size = len(str(value).encode("utf-8"))
+    if encoded_size > 4096:
+        errors.append("client_summary is too large")
+    forbidden = FORBIDDEN_REQUEST_FIELDS | {"payload", "evidence", "summary", "command"}
+    for key in value:
+        if key in forbidden:
+            errors.append(f"private field is not allowed in client_summary: {key}")
 
 
 def _decode_base64(value: Any, label: str, errors: list[str]) -> bytes | None:

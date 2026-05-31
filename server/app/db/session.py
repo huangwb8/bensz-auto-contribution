@@ -28,8 +28,40 @@ CREATE TABLE IF NOT EXISTS anchors (
   signature_alg TEXT NOT NULL,
   signature_b64 TEXT NOT NULL,
   request_hash TEXT NOT NULL,
+  client_summary_json TEXT,
   receipt_json TEXT NOT NULL,
   UNIQUE(anchor_hash, ledger_id, client_sequence)
+);
+
+CREATE TABLE IF NOT EXISTS users (
+  user_id TEXT PRIMARY KEY,
+  email TEXT NOT NULL UNIQUE,
+  password_salt_b64 TEXT NOT NULL,
+  password_hash_b64 TEXT NOT NULL,
+  password_iterations INTEGER NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS api_tokens (
+  token_id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  label TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  last_used_at TEXT,
+  revoked_at TEXT,
+  FOREIGN KEY(user_id) REFERENCES users(user_id)
+);
+
+CREATE TABLE IF NOT EXISTS cloud_ledgers (
+  ledger_id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  last_anchor_hash TEXT,
+  last_sequence INTEGER,
+  last_seen_at TEXT,
+  FOREIGN KEY(user_id) REFERENCES users(user_id)
 );
 
 CREATE TABLE IF NOT EXISTS audit_events (
@@ -61,8 +93,38 @@ CREATE TABLE IF NOT EXISTS anchors (
   signature_alg TEXT NOT NULL,
   signature_b64 TEXT NOT NULL,
   request_hash TEXT NOT NULL,
+  client_summary_json TEXT,
   receipt_json TEXT NOT NULL,
   UNIQUE(anchor_hash, ledger_id, client_sequence)
+);
+
+CREATE TABLE IF NOT EXISTS users (
+  user_id TEXT PRIMARY KEY,
+  email TEXT NOT NULL UNIQUE,
+  password_salt_b64 TEXT NOT NULL,
+  password_hash_b64 TEXT NOT NULL,
+  password_iterations INTEGER NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS api_tokens (
+  token_id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(user_id),
+  token_hash TEXT NOT NULL UNIQUE,
+  label TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  last_used_at TEXT,
+  revoked_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS cloud_ledgers (
+  ledger_id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(user_id),
+  display_name TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  last_anchor_hash TEXT,
+  last_sequence BIGINT,
+  last_seen_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS audit_events (
@@ -109,6 +171,7 @@ def _connect_sqlite(db_url: str) -> sqlite3.Connection:
     connection.execute("PRAGMA foreign_keys = ON")
     connection.executescript(SQLITE_SCHEMA)
     _migrate_sqlite_anchors(connection)
+    _migrate_sqlite_cloud(connection)
     connection.commit()
     return connection
 
@@ -121,6 +184,7 @@ def _connect_postgres(db_url: str) -> Any:
     for statement in _split_sql_statements(POSTGRES_SCHEMA):
         connection.execute(statement)
     _migrate_postgres_anchors(connection)
+    _migrate_postgres_cloud(connection)
     connection.commit()
     return connection
 
@@ -173,6 +237,7 @@ def _migrate_sqlite_anchors(connection: sqlite3.Connection) -> None:
         """
     )
     connection.execute("UPDATE anchors SET ledger_id = '' WHERE ledger_id IS NULL")
+    _sqlite_add_column(connection, "anchors", "client_summary_json", "TEXT")
 
 
 def _migrate_postgres_anchors(connection: Any) -> None:
@@ -207,3 +272,26 @@ def _migrate_postgres_anchors(connection: Any) -> None:
         """
     )
     connection.execute("UPDATE anchors SET ledger_id = '' WHERE ledger_id IS NULL")
+    connection.execute("ALTER TABLE anchors ADD COLUMN IF NOT EXISTS client_summary_json TEXT")
+
+
+def _migrate_sqlite_cloud(connection: sqlite3.Connection) -> None:
+    _sqlite_add_column(connection, "api_tokens", "last_used_at", "TEXT")
+    _sqlite_add_column(connection, "api_tokens", "revoked_at", "TEXT")
+    _sqlite_add_column(connection, "cloud_ledgers", "last_anchor_hash", "TEXT")
+    _sqlite_add_column(connection, "cloud_ledgers", "last_sequence", "INTEGER")
+    _sqlite_add_column(connection, "cloud_ledgers", "last_seen_at", "TEXT")
+
+
+def _migrate_postgres_cloud(connection: Any) -> None:
+    connection.execute("ALTER TABLE api_tokens ADD COLUMN IF NOT EXISTS last_used_at TEXT")
+    connection.execute("ALTER TABLE api_tokens ADD COLUMN IF NOT EXISTS revoked_at TEXT")
+    connection.execute("ALTER TABLE cloud_ledgers ADD COLUMN IF NOT EXISTS last_anchor_hash TEXT")
+    connection.execute("ALTER TABLE cloud_ledgers ADD COLUMN IF NOT EXISTS last_sequence BIGINT")
+    connection.execute("ALTER TABLE cloud_ledgers ADD COLUMN IF NOT EXISTS last_seen_at TEXT")
+
+
+def _sqlite_add_column(connection: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    columns = {row["name"] for row in connection.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in columns:
+        connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")

@@ -41,6 +41,16 @@ BAC_ANCHOR_RATE_LIMIT_PER_MINUTE=120
 
 Use a reverse proxy or platform gateway for additional network-level rate limits and TLS termination. Do not store real tokens or private keys in the repository.
 
+End users can register or log in through the CLI or the small web console:
+
+```bash
+bac cloud register --url https://bac.example.com --email user@example.com
+bac cloud login --url https://bac.example.com --email user@example.com
+bac cloud link --url https://bac.example.com --ledger-name my-project
+```
+
+The web console is available at `/cloud`. User tokens are bearer tokens for client writes and ledger management. The server still keeps the Ed25519 signing private key; clients only store their own cloud token outside `.bac`.
+
 To publish the server image directly to DockerHub as `linux/amd64`, use the local release script:
 
 ```bash
@@ -52,10 +62,15 @@ See [DockerHub Release](../docs/dockerhub-release.md) for Docker login, tag rule
 ## API
 
 - `GET /healthz`
+- `GET /cloud`
 - `GET /api/v1/public-keys`
-- `POST /api/v1/anchors` requires `Authorization: Bearer $BAC_ANCHOR_API_TOKEN` in production
+- `POST /api/v1/auth/register`
+- `POST /api/v1/auth/login`
+- `GET /api/v1/cloud/me` requires a user bearer token
+- `POST /api/v1/cloud/ledgers` requires a user bearer token
+- `POST /api/v1/anchors` requires `Authorization: Bearer ...` in production; either the deployment write token or a registered user token is accepted
 - `GET /api/v1/receipts/{receipt_id}` remains public for callers that already know an opaque receipt id
-- `GET /api/v1/ledgers/{ledger_id}/receipts` is disabled by default in production; when enabled, it requires the API token
+- `GET /api/v1/ledgers/{ledger_id}/receipts` is disabled by default in production; when enabled, it requires the deployment write token or the owning user token
 - `GET /admin` requires `Authorization: Bearer $BAC_ANCHOR_ADMIN_TOKEN` in production, or returns 404 if no admin token is configured
 
 Receipt signatures use Ed25519 over canonical JSON signing payload `bac.anchor.receipt.signing_payload.v1`. Repeating the same `(anchor_hash, ledger_id, sequence)` returns the same receipt.

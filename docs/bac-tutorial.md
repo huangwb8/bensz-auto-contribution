@@ -387,13 +387,36 @@ bac record \
 
 `config set`
 
-追加一条配置事件，当前支持 `mode`、`anchor.url` 和 `anchor.require`：
+追加一条配置事件，当前支持 `mode`、`anchor.url`、`anchor.require`、`anchor.ledger_id` 和 `cloud.auto_anchor`：
 
 ```bash
 bac config set mode hybrid
 bac config set anchor.url http://localhost:8080
 bac config set anchor.require true
 ```
+
+`cloud register/login/link/status`
+
+BAC Cloud 工作流用于把本地 `.bac` 账本绑定到你部署的 BAC 服务端。用户可以通过 CLI 注册或登录，也可以访问服务端 `/cloud` 页面在 GUI 中拿到 token。CLI token 保存在本机用户配置目录，默认是 `~/.config/bac/credentials.json`，不会写入 `.bac`。
+
+```bash
+bac cloud register --url https://bac.example.com --email user@example.com
+bac cloud login --url https://bac.example.com --email user@example.com
+bac cloud link --url https://bac.example.com --ledger-name my-project
+bac cloud status
+```
+
+`cloud link` 会在服务端创建 cloud ledger，在本地追加配置事件，并立即对绑定后的账本 head 执行一次远程锚定：
+
+- `mode: hybrid`
+- `anchor.url: https://bac.example.com`
+- `anchor.require: true`
+- `anchor.ledger_id: 服务端返回的 ledger id`
+- `cloud.auto_anchor: true`
+
+之后正常使用 `bac record` 追加事件时，CLI 会自动执行一次锚定：本地完整 `.bac` 仍保留在项目中；服务端只接收盲化 `anchor_hash`、ledger id、sequence 和低敏 `client_summary`。`client_summary` 包含事件数量、来源计数、信任等级计数和当前 head 事件类型，不包含路径、diff、payload、prompt、actor、项目名或原始 `head_hash`。
+
+如果 `cloud link` 显式传入 `--allow-insecure-anchor-url`，本地配置会记录 `anchor.allow_insecure: true`，仅用于本地开发环境后续自动锚定同一个非 HTTPS/内网地址。生产环境应使用 HTTPS 公网地址。
 
 `anchor request`
 

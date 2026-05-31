@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import base64
+import binascii
+import hashlib
+import hmac
 import json
 import secrets
 import time
@@ -29,6 +32,9 @@ try:
     import redis
 except ImportError:  # pragma: no cover - exercised when server extras are not installed.
     redis = None
+
+
+PASSWORD_ITERATIONS = 210_000
 
 
 def create_app() -> FastAPI:
@@ -76,9 +82,136 @@ def create_app() -> FastAPI:
             ],
         }
 
+    @app.get("/cloud", response_class=HTMLResponse)
+    def cloud_console() -> str:
+        return """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>BAC Cloud</title>
+<style>
+body{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;max-width:760px;margin:40px auto;padding:0 20px;line-height:1.5}
+label{display:block;margin-top:12px}
+input{box-sizing:border-box;width:100%;padding:8px;margin-top:4px}
+button{margin-top:14px;padding:8px 12px}
+pre{background:#f6f8fa;padding:12px;overflow:auto}
+</style>
+</head>
+<body>
+<h1>BAC Cloud</h1>
+<p>Register or log in to create a local CLI token. Store the token outside your .bac file.</p>
+<label>Email<input id="email" type="email" autocomplete="username"></label>
+<label>Password<input id="password" type="password" autocomplete="current-password"></label>
+<button onclick="submitAuth('/api/v1/auth/register')">Register</button>
+<button onclick="submitAuth('/api/v1/auth/login')">Log in</button>
+<pre id="output"></pre>
+<script>
+async function submitAuth(path) {
+  const response = await fetch(path, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      email: document.getElementById('email').value,
+      password: document.getElementById('password').value
+    })
+  });
+  document.getElementById('output').textContent = JSON.stringify(await response.json(), null, 2);
+}
+</script>
+</body>
+</html>"""
+
+    @app.post("/api/v1/auth/register")
+    async def register(request: Request) -> dict[str, Any]:
+        payload = await request.json()
+        email = _normalize_email(payload.get("email"))
+        password = payload.get("password")
+        if not email:
+            raise HTTPException(status_code=422, detail={"code": "invalid_email"})
+        if not isinstance(password, str) or len(password) < 8:
+            raise HTTPException(status_code=422, detail={"code": "weak_password"})
+        if db.execute("SELECT user_id FROM users WHERE email = ?", (email,)).fetchone():
+            raise HTTPException(status_code=409, detail={"code": "email_already_registered"})
+
+        user_id = f"user_{uuid.uuid4().hex}"
+        salt_b64, password_hash_b64 = _hash_password(password)
+        created_at = utc_now()
+        db.execute(
+            """
+            INSERT INTO users (
+              user_id, email, password_salt_b64, password_hash_b64,
+              password_iterations, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (user_id, email, salt_b64, password_hash_b64, PASSWORD_ITERATIONS, created_at),
+        )
+        token = _issue_user_token(db, user_id, "default")
+        db.commit()
+        return _auth_response(user_id, email, token)
+
+    @app.post("/api/v1/auth/login")
+    async def login(request: Request) -> dict[str, Any]:
+        payload = await request.json()
+        email = _normalize_email(payload.get("email"))
+        password = payload.get("password")
+        if not email or not isinstance(password, str):
+            raise HTTPException(status_code=401, detail={"code": "invalid_credentials"})
+        row = db.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+        if not row or not _verify_password(password, row):
+            raise HTTPException(status_code=401, detail={"code": "invalid_credentials"})
+        token = _issue_user_token(db, row["user_id"], "cli-login")
+        db.commit()
+        return _auth_response(row["user_id"], row["email"], token)
+
+    @app.get("/api/v1/cloud/me")
+    def cloud_me(request: Request) -> dict[str, Any]:
+        auth = _require_user_token(request, db, settings)
+        ledgers = db.execute(
+            """
+            SELECT ledger_id, display_name, created_at, last_anchor_hash, last_sequence, last_seen_at
+            FROM cloud_ledgers
+            WHERE user_id = ?
+            ORDER BY created_at DESC
+            """,
+            (auth["user_id"],),
+        ).fetchall()
+        return {
+            "format": "bac.cloud.me.v1",
+            "user": {"user_id": auth["user_id"], "email": auth["email"]},
+            "ledgers": [dict(row) for row in ledgers],
+        }
+
+    @app.post("/api/v1/cloud/ledgers")
+    async def create_cloud_ledger(request: Request) -> dict[str, Any]:
+        auth = _require_user_token(request, db, settings)
+        payload = await request.json()
+        display_name = payload.get("display_name") if isinstance(payload, dict) else None
+        if not isinstance(display_name, str) or not display_name.strip():
+            display_name = "BAC ledger"
+        if len(display_name) > 120:
+            raise HTTPException(status_code=422, detail={"code": "invalid_display_name"})
+        ledger_id = f"ledger_{uuid.uuid4().hex}"
+        created_at = utc_now()
+        db.execute(
+            """
+            INSERT INTO cloud_ledgers (ledger_id, user_id, display_name, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (ledger_id, auth["user_id"], display_name.strip(), created_at),
+        )
+        db.commit()
+        return {
+            "format": "bac.cloud.ledger.v1",
+            "ledger_id": ledger_id,
+            "display_name": display_name.strip(),
+            "created_at": created_at,
+        }
+
     @app.post("/api/v1/anchors")
     async def create_anchor(request: Request) -> dict[str, Any]:
-        _require_token(request, settings, settings.api_token, "api")
+        auth = _optional_api_auth(request, db, settings)
+        if _is_production(settings) and not auth:
+            raise HTTPException(status_code=401, detail={"code": "authentication_required"})
         if _is_production(settings) and not rate_limiter.allow(_rate_limit_key(request)):
             raise HTTPException(status_code=429, detail={"code": "rate_limited"})
         payload = await request.json()
@@ -86,6 +219,8 @@ def create_app() -> FastAPI:
         if errors:
             raise HTTPException(status_code=422, detail={"code": "invalid_anchor_request", "errors": errors})
         ledger_id = payload.get("ledger_id") or ""
+        if auth and auth["kind"] == "user" and ledger_id:
+            _require_ledger_owner(db, auth["user_id"], ledger_id)
         with lock:
             existing = _find_existing_anchor(db, payload["anchor_hash"], ledger_id, payload["sequence"])
             if existing:
@@ -99,8 +234,8 @@ def create_app() -> FastAPI:
                     INSERT INTO anchors (
                       receipt_id, anchor_hash, ledger_id, client_sequence, server_sequence,
                       client_created_at, server_created_at, key_id, signature_alg,
-                      signature_b64, request_hash, receipt_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                      signature_b64, request_hash, client_summary_json, receipt_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         receipt["receipt_id"],
@@ -114,9 +249,11 @@ def create_app() -> FastAPI:
                         receipt["signature_alg"],
                         receipt["signature"],
                         hash_json(payload),
+                        canonical_json(payload.get("client_summary") or {}),
                         canonical_json(receipt),
                     ),
                 )
+                _mark_ledger_anchor(db, ledger_id, payload["anchor_hash"], payload["sequence"])
                 db.commit()
             except DatabaseIntegrityError:
                 db.rollback()
@@ -137,9 +274,13 @@ def create_app() -> FastAPI:
     def ledger_receipts(ledger_id: str, request: Request) -> dict[str, Any]:
         if not settings.enable_ledger_query:
             raise HTTPException(status_code=404, detail={"code": "not_found"})
-        _require_token(request, settings, settings.api_token, "api")
+        auth = _optional_api_auth(request, db, settings)
+        if _is_production(settings) and not auth:
+            raise HTTPException(status_code=401, detail={"code": "authentication_required"})
         if not ledger_id or len(ledger_id) > 128:
             raise HTTPException(status_code=422, detail={"code": "invalid_ledger_id"})
+        if auth and auth["kind"] == "user":
+            _require_ledger_owner(db, auth["user_id"], ledger_id)
         rows = db.execute(
             "SELECT receipt_json FROM anchors WHERE ledger_id = ? ORDER BY server_sequence",
             (ledger_id,),
@@ -235,6 +376,112 @@ def _require_token(request: Request, settings: Any, expected: str | None, label:
     provided = authorization[len(prefix) :]
     if not secrets.compare_digest(provided, expected):
         raise HTTPException(status_code=403, detail={"code": "forbidden"})
+
+
+def _optional_api_auth(request: Request, db: Any, settings: Any) -> dict[str, Any] | None:
+    authorization = request.headers.get("authorization", "")
+    prefix = "Bearer "
+    if not authorization.startswith(prefix):
+        return None
+    provided = authorization[len(prefix) :]
+    if settings.api_token and secrets.compare_digest(provided, settings.api_token):
+        return {"kind": "service"}
+    row = db.execute(
+        """
+        SELECT api_tokens.token_id, api_tokens.user_id, users.email
+        FROM api_tokens
+        JOIN users ON users.user_id = api_tokens.user_id
+        WHERE api_tokens.token_hash = ? AND api_tokens.revoked_at IS NULL
+        """,
+        (_token_hash(provided),),
+    ).fetchone()
+    if not row:
+        if _is_production(settings):
+            raise HTTPException(status_code=403, detail={"code": "forbidden"})
+        return None
+    db.execute("UPDATE api_tokens SET last_used_at = ? WHERE token_id = ?", (utc_now(), row["token_id"]))
+    db.commit()
+    return {"kind": "user", "user_id": row["user_id"], "email": row["email"]}
+
+
+def _require_user_token(request: Request, db: Any, settings: Any) -> dict[str, Any]:
+    auth = _optional_api_auth(request, db, settings)
+    if not auth or auth["kind"] != "user":
+        raise HTTPException(status_code=401, detail={"code": "user_token_required"})
+    return auth
+
+
+def _require_ledger_owner(db: Any, user_id: str, ledger_id: str) -> None:
+    row = db.execute(
+        "SELECT ledger_id FROM cloud_ledgers WHERE ledger_id = ? AND user_id = ?",
+        (ledger_id, user_id),
+    ).fetchone()
+    if not row:
+        raise HTTPException(status_code=403, detail={"code": "ledger_forbidden"})
+
+
+def _mark_ledger_anchor(db: Any, ledger_id: str, anchor_hash: str, sequence: int) -> None:
+    if not ledger_id:
+        return
+    db.execute(
+        """
+        UPDATE cloud_ledgers
+        SET last_anchor_hash = ?, last_sequence = ?, last_seen_at = ?
+        WHERE ledger_id = ?
+        """,
+        (anchor_hash, sequence, utc_now(), ledger_id),
+    )
+
+
+def _normalize_email(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    email = value.strip().lower()
+    if "@" not in email or len(email) > 254:
+        return None
+    return email
+
+
+def _hash_password(password: str, salt: bytes | None = None) -> tuple[str, str]:
+    salt_bytes = salt or secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt_bytes, PASSWORD_ITERATIONS)
+    return base64.b64encode(salt_bytes).decode("ascii"), base64.b64encode(digest).decode("ascii")
+
+
+def _verify_password(password: str, row: Any) -> bool:
+    try:
+        salt = base64.b64decode(row["password_salt_b64"], validate=True)
+        expected = base64.b64decode(row["password_hash_b64"], validate=True)
+    except (binascii.Error, ValueError):
+        return False
+    iterations = int(row["password_iterations"])
+    actual = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
+    return hmac.compare_digest(actual, expected)
+
+
+def _issue_user_token(db: Any, user_id: str, label: str) -> str:
+    token = "bac_" + secrets.token_urlsafe(32)
+    db.execute(
+        """
+        INSERT INTO api_tokens (token_id, user_id, token_hash, label, created_at)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (f"token_{uuid.uuid4().hex}", user_id, _token_hash(token), label, utc_now()),
+    )
+    return token
+
+
+def _token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _auth_response(user_id: str, email: str, token: str) -> dict[str, Any]:
+    return {
+        "format": "bac.cloud.auth.v1",
+        "user": {"user_id": user_id, "email": email},
+        "token": token,
+        "token_type": "bearer",
+    }
 
 
 def _rate_limit_key(request: Request) -> str:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import ipaddress
 import json
 import os
@@ -94,7 +95,10 @@ def build_parser() -> argparse.ArgumentParser:
     config = subparsers.add_parser("config", help="append BAC configuration metadata")
     config_subparsers = config.add_subparsers(dest="config_command", required=True)
     config_set = config_subparsers.add_parser("set", help="set a BAC configuration value")
-    config_set.add_argument("key", choices=["mode", "anchor.url", "anchor.require"])
+    config_set.add_argument(
+        "key",
+        choices=["mode", "anchor.url", "anchor.require", "anchor.ledger_id", "cloud.auto_anchor"],
+    )
     config_set.add_argument("value")
     config_set.add_argument("--json", action="store_true", help="print machine-readable output")
     config_set.set_defaults(func=_cmd_config_set)
@@ -126,7 +130,48 @@ def build_parser() -> argparse.ArgumentParser:
     anchor_push.add_argument("--json", action="store_true", help="print machine-readable output")
     anchor_push.set_defaults(func=_cmd_anchor_push)
 
+    cloud = subparsers.add_parser("cloud", help="connect this BAC ledger to a BAC cloud service")
+    cloud_subparsers = cloud.add_subparsers(dest="cloud_command", required=True)
+
+    cloud_register = cloud_subparsers.add_parser("register", help="register a BAC cloud account and store a local token")
+    _add_cloud_auth_args(cloud_register)
+    cloud_register.set_defaults(func=_cmd_cloud_register)
+
+    cloud_login = cloud_subparsers.add_parser("login", help="log in to BAC cloud and store a local token")
+    _add_cloud_auth_args(cloud_login)
+    cloud_login.set_defaults(func=_cmd_cloud_login)
+
+    cloud_link = cloud_subparsers.add_parser("link", help="bind the current .bac ledger to a cloud ledger")
+    cloud_link.add_argument("--url", help="BAC cloud base URL; defaults to existing anchor.url")
+    cloud_link.add_argument("--token", help="bearer token; defaults to stored credentials or BAC_ANCHOR_API_TOKEN")
+    cloud_link.add_argument("--ledger-name", help="display name in BAC cloud")
+    cloud_link.add_argument(
+        "--allow-insecure-anchor-url",
+        action="store_true",
+        help="allow http/private cloud URLs for local development",
+    )
+    cloud_link.add_argument("--json", action="store_true", help="print machine-readable output")
+    cloud_link.set_defaults(func=_cmd_cloud_link)
+
+    cloud_status = cloud_subparsers.add_parser("status", help="show cloud binding and token status")
+    cloud_status.add_argument("--url", help="BAC cloud base URL; defaults to existing anchor.url")
+    cloud_status.add_argument("--token", help="bearer token; defaults to stored credentials or BAC_ANCHOR_API_TOKEN")
+    cloud_status.add_argument("--json", action="store_true", help="print machine-readable output")
+    cloud_status.set_defaults(func=_cmd_cloud_status)
+
     return parser
+
+
+def _add_cloud_auth_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--url", required=True, help="BAC cloud base URL")
+    parser.add_argument("--email", required=True)
+    parser.add_argument("--password", help="password; prompts when omitted")
+    parser.add_argument(
+        "--allow-insecure-anchor-url",
+        action="store_true",
+        help="allow http/private cloud URLs for local development",
+    )
+    parser.add_argument("--json", action="store_true", help="print machine-readable output")
 
 
 def _cmd_init(args: argparse.Namespace) -> int:
@@ -149,9 +194,13 @@ def _cmd_init(args: argparse.Namespace) -> int:
 def _cmd_record(args: argparse.Namespace) -> int:
     root = Path(args.root).resolve()
     bac_path = _bac_path(root, args.bac_file)
-    head_hash = current_head_hash(bac_path)
-    if head_hash is None:
+    events = read_events(bac_path)
+    if not events:
         raise FileNotFoundError(f"BAC file is empty or missing: {bac_path}")
+    head_hash = events[-1].get("event_hash")
+    if not isinstance(head_hash, str):
+        raise ValueError("current BAC head is missing event_hash")
+    config = _bac_config(events)
     if args.trust_level in {"signed", "anchored"}:
         raise ValueError(
             f"{args.trust_level} trust_level is reserved; use event signatures or bac anchor import/push"
@@ -186,6 +235,13 @@ def _cmd_record(args: argparse.Namespace) -> int:
         "head_hash": event["event_hash"],
         "redactions": event["redactions"],
     }
+    if config.get("cloud.auto_anchor"):
+        checkpoint = _anchor_push_current(root, bac_path)
+        output["cloud_anchor"] = {
+            "status": "anchored",
+            "event_id": checkpoint["event_id"],
+            "head_hash": checkpoint["event_hash"],
+        }
     _print_output(output, args.json)
     return 0
 
@@ -257,19 +313,13 @@ def _cmd_config_set(args: argparse.Namespace) -> int:
         config["anchor.require"] = _parse_bool(args.value)
     elif args.key == "anchor.url":
         config["anchor.url"] = args.value
+    elif args.key == "anchor.ledger_id":
+        config["anchor.ledger_id"] = args.value
+    elif args.key == "cloud.auto_anchor":
+        config["cloud.auto_anchor"] = _parse_bool(args.value)
     if not isinstance(config.get("anchor.ledger_nonce"), str):
         config["anchor.ledger_nonce"] = token_hex(32)
-    event = build_record_event(
-        root=root,
-        prev_event_hash=events[-1]["event_hash"],
-        event_type="verification",
-        source_type="system",
-        summary=f"Updated BAC config: {args.key}",
-        trust_level="observed",
-        actor=default_actor("bac", "system_tool"),
-        payload={"bac_config": config},
-    )
-    append_event(bac_path, event)
+    event = _append_config_event(root, bac_path, events, config, f"Updated BAC config: {args.key}")
     _print_output({"status": "configured", "key": args.key, "head_hash": event["event_hash"]}, args.json)
     return 0
 
@@ -307,21 +357,122 @@ def _cmd_anchor_import(args: argparse.Namespace) -> int:
 def _cmd_anchor_push(args: argparse.Namespace) -> int:
     root = Path(args.root).resolve()
     bac_path = _bac_path(root, args.bac_file)
+    event = _anchor_push_current(
+        root,
+        bac_path,
+        public_key=args.public_key,
+        token=args.token,
+        allow_insecure=args.allow_insecure_anchor_url,
+    )
+    output = {"status": "anchored", "event_id": event["event_id"], "head_hash": event["event_hash"]}
+    _print_output(output, args.json)
+    return 0
+
+
+def _cmd_cloud_register(args: argparse.Namespace) -> int:
+    _validate_anchor_push_url(args.url, allow_insecure=args.allow_insecure_anchor_url)
+    password = args.password or getpass.getpass("BAC cloud password: ")
+    response = _post_cloud_json(args.url, "/api/v1/auth/register", {"email": args.email, "password": password})
+    _store_cloud_token(args.url, response["token"], response.get("user", {}).get("email"))
+    _print_output(
+        {
+            "status": "registered",
+            "url": args.url.rstrip("/"),
+            "email": response.get("user", {}).get("email"),
+            "token": response["token"],
+        },
+        args.json,
+    )
+    return 0
+
+
+def _cmd_cloud_login(args: argparse.Namespace) -> int:
+    _validate_anchor_push_url(args.url, allow_insecure=args.allow_insecure_anchor_url)
+    password = args.password or getpass.getpass("BAC cloud password: ")
+    response = _post_cloud_json(args.url, "/api/v1/auth/login", {"email": args.email, "password": password})
+    _store_cloud_token(args.url, response["token"], response.get("user", {}).get("email"))
+    _print_output(
+        {
+            "status": "logged_in",
+            "url": args.url.rstrip("/"),
+            "email": response.get("user", {}).get("email"),
+            "token": response["token"],
+        },
+        args.json,
+    )
+    return 0
+
+
+def _cmd_cloud_link(args: argparse.Namespace) -> int:
+    root = Path(args.root).resolve()
+    bac_path = _bac_path(root, args.bac_file)
     events = read_events(bac_path)
     if not events:
         raise FileNotFoundError(f"BAC file is empty or missing: {bac_path}")
     config = _bac_config(events)
-    anchor_url = config.get("anchor.url")
+    anchor_url = args.url or config.get("anchor.url")
     if not isinstance(anchor_url, str) or not anchor_url:
-        raise ValueError("anchor.url is not configured; run bac config set anchor.url <url>")
+        raise ValueError("cloud URL is missing; pass --url or configure anchor.url")
     _validate_anchor_push_url(anchor_url, allow_insecure=args.allow_insecure_anchor_url)
+    token = args.token or os.getenv("BAC_ANCHOR_API_TOKEN") or _cloud_token_for(anchor_url)
+    if not token:
+        raise ValueError("BAC cloud token is missing; run bac cloud login/register or pass --token")
+    ledger_name = args.ledger_name or root.name or "BAC ledger"
+    response = _post_cloud_json(
+        anchor_url,
+        "/api/v1/cloud/ledgers",
+        {"display_name": ledger_name},
+        token=token,
+    )
+    config.update(
+        {
+            "mode": "hybrid",
+            "anchor.url": anchor_url.rstrip("/"),
+            "anchor.require": True,
+            "anchor.ledger_id": response["ledger_id"],
+            "cloud.auto_anchor": True,
+            "anchor.allow_insecure": bool(args.allow_insecure_anchor_url),
+        }
+    )
+    if not isinstance(config.get("anchor.ledger_nonce"), str):
+        config["anchor.ledger_nonce"] = token_hex(32)
+    event = _append_config_event(root, bac_path, events, config, "Linked BAC ledger to cloud")
+    checkpoint = _anchor_push_current(
+        root,
+        bac_path,
+        token=token,
+        allow_insecure=args.allow_insecure_anchor_url,
+    )
+    output = {
+        "status": "linked",
+        "url": anchor_url.rstrip("/"),
+        "ledger_id": response["ledger_id"],
+        "config_event_id": event["event_id"],
+        "anchored_event_id": checkpoint["event_id"],
+        "head_hash": checkpoint["event_hash"],
+        "auto_anchor": True,
+    }
+    _print_output(output, args.json)
+    return 0
 
-    request = _build_request_for_current_head(events)
-    token = args.token or os.getenv("BAC_ANCHOR_API_TOKEN")
-    receipt = _post_anchor_request(anchor_url, request, token=token)
-    public_key = args.public_key or _fetch_public_key(anchor_url, receipt.get("key_id"))
-    event = _append_anchor_checkpoint(root, bac_path, events, receipt, public_key)
-    output = {"status": "anchored", "event_id": event["event_id"], "head_hash": event["event_hash"]}
+
+def _cmd_cloud_status(args: argparse.Namespace) -> int:
+    root = Path(args.root).resolve()
+    config = _bac_config(read_events(_bac_path(root, args.bac_file)))
+    anchor_url = args.url or config.get("anchor.url")
+    token = args.token or os.getenv("BAC_ANCHOR_API_TOKEN") or (
+        _cloud_token_for(anchor_url) if isinstance(anchor_url, str) else None
+    )
+    output: dict[str, Any] = {
+        "status": "configured" if anchor_url else "not_configured",
+        "url": anchor_url,
+        "ledger_id": config.get("anchor.ledger_id"),
+        "anchor_required": bool(config.get("anchor.require")),
+        "auto_anchor": bool(config.get("cloud.auto_anchor")),
+        "token_available": bool(token),
+    }
+    if isinstance(anchor_url, str) and token:
+        output["cloud"] = _get_cloud_json(anchor_url, "/api/v1/cloud/me", token=token)
     _print_output(output, args.json)
     return 0
 
@@ -369,6 +520,51 @@ def _bac_config(events: list[dict[str, Any]]) -> dict[str, Any]:
     return config
 
 
+def _append_config_event(
+    root: Path,
+    bac_path: Path,
+    events: list[dict[str, Any]],
+    config: dict[str, Any],
+    summary: str,
+) -> dict[str, Any]:
+    event = build_record_event(
+        root=root,
+        prev_event_hash=events[-1]["event_hash"],
+        event_type="verification",
+        source_type="system",
+        summary=summary,
+        trust_level="observed",
+        actor=default_actor("bac", "system_tool"),
+        payload={"bac_config": config},
+    )
+    append_event(bac_path, event)
+    return event
+
+
+def _anchor_push_current(
+    root: Path,
+    bac_path: Path,
+    *,
+    public_key: str | None = None,
+    token: str | None = None,
+    allow_insecure: bool = False,
+) -> dict[str, Any]:
+    events = read_events(bac_path)
+    if not events:
+        raise FileNotFoundError(f"BAC file is empty or missing: {bac_path}")
+    config = _bac_config(events)
+    anchor_url = config.get("anchor.url")
+    if not isinstance(anchor_url, str) or not anchor_url:
+        raise ValueError("anchor.url is not configured; run bac config set anchor.url <url>")
+    _validate_anchor_push_url(anchor_url, allow_insecure=allow_insecure or bool(config.get("anchor.allow_insecure")))
+
+    request = _build_request_for_current_head(events)
+    resolved_token = token or os.getenv("BAC_ANCHOR_API_TOKEN") or _cloud_token_for(anchor_url)
+    receipt = _post_anchor_request(anchor_url, request, token=resolved_token)
+    resolved_public_key = public_key or _fetch_public_key(anchor_url, receipt.get("key_id"))
+    return _append_anchor_checkpoint(root, bac_path, events, receipt, resolved_public_key)
+
+
 def _build_request_for_current_head(events: list[dict[str, Any]]) -> dict[str, Any]:
     config = _bac_config(events)
     ledger_nonce = config.get("anchor.ledger_nonce")
@@ -389,7 +585,34 @@ def _build_request_for_current_head(events: list[dict[str, Any]]) -> dict[str, A
         ledger_nonce=ledger_nonce,
         sequence=sequence,
         ledger_id=config.get("anchor.ledger_id") if isinstance(config.get("anchor.ledger_id"), str) else None,
+        client_summary=_cloud_client_summary(events),
     )
+
+
+def _cloud_client_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
+    source_counts: dict[str, int] = {}
+    trust_counts: dict[str, int] = {}
+    for event in events:
+        source = event.get("source_type")
+        trust = event.get("trust_level")
+        if isinstance(source, str):
+            source_counts[source] = source_counts.get(source, 0) + 1
+        if isinstance(trust, str):
+            trust_counts[trust] = trust_counts.get(trust, 0) + 1
+    head = events[-1]
+    return {
+        "event_count": len(events),
+        "source_counts": source_counts,
+        "trust_counts": trust_counts,
+        "head_event_id": head.get("event_id"),
+        "head_event_type": head.get("event_type"),
+        "head_source_type": head.get("source_type"),
+        "head_trust_level": head.get("trust_level"),
+        "head_created_at": head.get("created_at"),
+        "redaction_count": sum(
+            len(event.get("redactions", [])) for event in events if isinstance(event.get("redactions"), list)
+        ),
+    }
 
 
 def _append_anchor_checkpoint(
@@ -434,21 +657,40 @@ def _read_json_file(path: Path, label: str) -> dict[str, Any]:
 
 
 def _post_anchor_request(anchor_url: str, request: dict[str, Any], token: str | None = None) -> dict[str, Any]:
-    url = anchor_url.rstrip("/") + "/api/v1/anchors"
+    return _post_cloud_json(anchor_url, "/api/v1/anchors", request, token=token)
+
+
+def _post_cloud_json(base_url: str, path: str, payload: dict[str, Any], token: str | None = None) -> dict[str, Any]:
+    url = base_url.rstrip("/") + path
     headers = {"Content-Type": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
     http_request = urllib.request.Request(
         url,
-        data=canonical_json(request).encode("utf-8"),
+        data=canonical_json(payload).encode("utf-8"),
         headers=headers,
         method="POST",
     )
+    return _open_json(http_request, "anchor service response")
+
+
+def _get_cloud_json(base_url: str, path: str, token: str | None = None) -> dict[str, Any]:
+    headers = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    http_request = urllib.request.Request(base_url.rstrip("/") + path, headers=headers, method="GET")
+    return _open_json(http_request, "cloud service response")
+
+
+def _open_json(http_request: urllib.request.Request, label: str) -> dict[str, Any]:
     try:
         with urllib.request.urlopen(http_request, timeout=15) as response:
-            return _json_response(response.read(), "anchor service response")
+            return _json_response(response.read(), label)
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise ValueError(f"cloud request failed with HTTP {exc.code}: {detail}") from exc
     except urllib.error.URLError as exc:
-        raise ValueError(f"anchor push failed: {exc}") from exc
+        raise ValueError(f"cloud request failed: {exc}") from exc
 
 
 def _fetch_public_key(anchor_url: str, key_id: Any) -> str:
@@ -522,13 +764,57 @@ def _json_response(raw: bytes, label: str) -> dict[str, Any]:
     return value
 
 
+def _credentials_path() -> Path:
+    configured = os.getenv("BAC_CLOUD_CREDENTIALS_FILE")
+    if configured:
+        return Path(configured)
+    config_home = os.getenv("XDG_CONFIG_HOME")
+    base = Path(config_home) if config_home else Path.home() / ".config"
+    return base / "bac" / "credentials.json"
+
+
+def _store_cloud_token(url: str, token: str, email: Any = None) -> None:
+    path = _credentials_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    credentials = _read_credentials(path)
+    services = credentials.setdefault("services", {})
+    services[url.rstrip("/")] = {"token": token, "email": email}
+    path.write_text(json.dumps(credentials, indent=2, sort_keys=True), encoding="utf-8")
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
+
+
+def _cloud_token_for(url: str) -> str | None:
+    credentials = _read_credentials(_credentials_path())
+    service = credentials.get("services", {}).get(url.rstrip("/"))
+    if isinstance(service, dict) and isinstance(service.get("token"), str):
+        return service["token"]
+    return None
+
+
+def _read_credentials(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {"services": {}}
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {"services": {}}
+    if not isinstance(value, dict):
+        return {"services": {}}
+    if not isinstance(value.get("services"), dict):
+        value["services"] = {}
+    return value
+
+
 def _parse_bool(raw: str) -> bool:
     normalized = raw.lower()
     if normalized in {"1", "true", "yes", "on"}:
         return True
     if normalized in {"0", "false", "no", "off"}:
         return False
-    raise ValueError("anchor.require must be true or false")
+    raise ValueError("boolean configuration values must be true or false")
 
 
 def _print_output(output: dict[str, Any], as_json: bool) -> None:

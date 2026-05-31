@@ -159,6 +159,17 @@ bac anchor push --allow-insecure-anchor-url
 
 `bac anchor push` 默认只允许安全的公网 `https://` 地址，并会检查域名解析结果是否指向私有或本地地址。显式的不安全开关仅用于本地开发。生产锚定服务如要求写入 token，可传 `--token` 或设置 `BAC_ANCHOR_API_TOKEN`；BAC 不会把该 token 写入 `.bac`。
 
+也可以使用 BAC Cloud 工作流把本地项目绑定到你部署的服务端。用户先注册或登录拿到 token，token 会保存在本机用户配置目录，不写入 `.bac`：
+
+```bash
+bac cloud register --url https://bac.example.com --email user@example.com
+bac cloud login --url https://bac.example.com --email user@example.com
+bac cloud link --url https://bac.example.com --ledger-name my-project
+bac cloud status
+```
+
+`bac cloud link` 会创建云端 ledger，把本地 `.bac` 配置为 `hybrid`、`anchor.require true` 和 `cloud.auto_anchor true`，并立即对绑定后的账本 head 做一次远程锚定。之后正常执行 `bac record` 时，本地仍然追加完整 `.bac` 事件，同时自动把盲化 `anchor_hash` 和低敏 `client_summary` 上传到 BAC 服务端，服务端返回 signed receipt，本地再写入 anchored checkpoint。
+
 可选 reference server 位于 `server/`：
 
 ```bash
