@@ -1,6 +1,8 @@
 # BAC Anchor Docker 部署
 
-`docs/deploy` 是面向服务器的 Compose 部署目录，默认接入 `npm_default` 外部网络，容器命名保持 `{应用名}-{组件}` 风格：
+`docs/deploy` 是面向服务器管理员的 Compose 部署示例目录，只保留部署所需的配置文件与说明。仓库内的便捷运维脚本统一放在 `tools/`，避免把脚本混入可复制到服务器的文档部署包。
+
+这套部署默认接入 `npm_default` 外部网络，容器命名保持 `{应用名}-{组件}` 风格：
 
 - `bac-anchor-app`：BAC Anchor Server
 - `bac-anchor-postgres`：PostgreSQL 持久化存储
@@ -37,13 +39,15 @@ PY
 ## 启动或更新
 
 ```bash
-./deploy.sh
+docker compose pull
+docker compose up -d --remove-orphans
+docker compose ps
 ```
 
 查看日志：
 
 ```bash
-./logs.sh
+docker compose logs -f --tail="${TAIL:-200}" bac-anchor-app
 ```
 
 健康检查：
@@ -57,15 +61,29 @@ docker compose exec bac-anchor-app python -c "import urllib.request; print(urlli
 备份 PostgreSQL：
 
 ```bash
-./backup-postgres.sh
+mkdir -p backups
+docker compose exec -T bac-anchor-postgres sh -c \
+  'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' \
+  > "backups/bac-anchor-$(date +%Y%m%d-%H%M%S).sql"
 ```
 
 恢复前建议先停止应用容器，避免写入竞争：
 
 ```bash
 docker compose stop bac-anchor-app
-./restore-postgres.sh backups/bac-anchor-YYYYMMDD-HHMMSS.sql
+docker compose exec -T bac-anchor-postgres sh -c \
+  'PGPASSWORD="$POSTGRES_PASSWORD" psql -U "$POSTGRES_USER" "$POSTGRES_DB"' \
+  < backups/bac-anchor-YYYYMMDD-HHMMSS.sql
 docker compose start bac-anchor-app
+```
+
+如果是在仓库工作区内维护这套部署，也可以从仓库根目录使用 `tools/` 下的辅助脚本：
+
+```bash
+tools/deploy.sh
+tools/logs.sh
+tools/backup-postgres.sh
+tools/restore-postgres.sh backups/bac-anchor-YYYYMMDD-HHMMSS.sql
 ```
 
 ## 反向代理

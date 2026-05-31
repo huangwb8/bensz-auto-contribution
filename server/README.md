@@ -25,7 +25,7 @@ docker compose -f server/docker-compose.yml up --build
 
 The compose file uses SQLite in a named volume and development key generation for local smoke tests. For production, set `BAC_ANCHOR_ENV=production` and provide an Ed25519 private key through `BAC_ANCHOR_PRIVATE_KEY_PATH` or `BAC_ANCHOR_PRIVATE_KEY_B64`.
 
-For server deployments, use [`docs/deploy`](../docs/deploy/README.md). That compose package runs the published DockerHub image as `bac-anchor-app`, stores anchor data in PostgreSQL, uses Redis for production rate-limit state, and joins the external `npm_default` network for reverse proxying.
+For server deployments, use [`docs/deploy`](../docs/deploy/README.md). That compose package runs the published DockerHub image as `bac-anchor-app`, stores anchor data in PostgreSQL, uses Redis for production rate-limit state, and joins the external `npm_default` network for reverse proxying. Repository helper scripts for that deployment live in [`tools`](../tools), outside the copyable deployment config.
 
 Production deployments must also configure bearer tokens:
 

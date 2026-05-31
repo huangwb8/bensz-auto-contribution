@@ -1,5 +1,11 @@
 # General
 
+- 更新docker镜像`ssh rn3`
+
+```
+cd /docker/bensz-auto-contribution; docker-compose pull; docker-compose down; docker-compose up -d
+```
+
 - 发布新版本
 
 ```

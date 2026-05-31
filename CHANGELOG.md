@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### Changed（变更）
+
+- 整理 BAC Anchor 部署目录职责：`docs/deploy` 仅保留可复制到服务器的 Compose 配置、环境变量示例和部署说明，部署/日志/备份/恢复辅助脚本迁移到 `tools/`。
+
 ## [1.2.3] - 2026-05-31
 
 ### Added（新增）
