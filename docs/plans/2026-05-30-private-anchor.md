@@ -1,22 +1,22 @@
-# BAC Local/Remote Anchor Server Implementation Plan
+# BAC 本地与远程锚定服务实施计划
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **给 Claude：** 必须使用子技能 `superpowers:executing-plans`，按任务逐步执行本计划。
 
-**Goal:** 为 BAC 增加本地模式与默认本地+远程模式，并在 `./server` 托管可 Docker 部署的隐私保护型锚定服务和现代化后台，使创作者无法在锚定时间之后单方面重写一套无痕历史，同时避免上传 `.bac` 内容、文件路径、项目名、diff 或提示词。
+**目标：** 为 BAC 增加本地模式与默认本地+远程模式，并在 `./server` 托管可 Docker 部署的隐私保护型锚定服务和现代化后台，使创作者无法在锚定时间之后单方面重写一套无痕历史，同时避免上传 `.bac` 内容、文件路径、项目名、diff 或提示词。
 
-**Architecture:** BAC 采用本地优先架构：本地 `.bac` 继续保存完整事件链和验证所需上下文，远程服务只作为可信时间、签名 receipt 和审计查询的增强层。默认运行模式为 `hybrid`，客户端在写入本地 `.bac` 后尝试向服务端提交盲化后的 `anchor_hash`，服务端返回带服务端时间戳和 Ed25519 签名的 receipt；用户也可以显式选择 `local` 纯本地模式。本地用 `checkpoint` 事件保存 receipt，验证器可离线校验 receipt 签名，并检查 receipt 是否锚定了该 checkpoint 之前的 `head_hash`。
+**架构：** BAC 采用本地优先架构：本地 `.bac` 继续保存完整事件链和验证所需上下文，远程服务只作为可信时间、签名 receipt 和审计查询的增强层。默认运行模式为 `hybrid`，客户端在写入本地 `.bac` 后尝试向服务端提交盲化后的 `anchor_hash`，服务端返回带服务端时间戳和 Ed25519 签名的 receipt；用户也可以显式选择 `local` 纯本地模式。本地用 `checkpoint` 事件保存 receipt，验证器可离线校验 receipt 签名，并检查 receipt 是否锚定了该 checkpoint 之前的 `head_hash`。
 
-**Tech Stack:** Python 3.10+，现有 ZIP v2 BAC 容器，canonical JSON，SHA-256，Ed25519；本地端新增可选 `cryptography` extra 用于 receipt 签名验证。服务端放在 `./server`，建议使用 FastAPI、SQLite 默认存储、可选 PostgreSQL、React/Vite 管理后台、Dockerfile 与 Docker Compose；测试继续使用 `unittest`/`pytest`、CLI 子进程端到端测试和服务端 API 测试。
+**技术栈：** Python 3.10+，现有 ZIP v2 BAC 容器，canonical JSON，SHA-256，Ed25519；本地端新增可选 `cryptography` extra 用于 receipt 签名验证。服务端放在 `./server`，建议使用 FastAPI、SQLite 默认存储、可选 PostgreSQL、React/Vite 管理后台、Dockerfile 与 Docker Compose；测试继续使用 `unittest`/`pytest`、CLI 子进程端到端测试和服务端 API 测试。
 
-**Minimal Change Scope:** 允许修改 `src/bac/core/`、`src/bac/service/`、`src/bac/adapters/cli.py`、`tests/`、`server/`、`README.md`、`README.zh-CN.md`、`docs/bac-tutorial.md`、`CHANGELOG.md`、`pyproject.toml`。避免实现完整区块链、上传完整 `.bac`、上传文件路径或 diff、引入复杂计费系统、多租户 RBAC 或修改 PyPI 发布流程。
+**最小变更范围：** 允许修改 `src/bac/core/`、`src/bac/service/`、`src/bac/adapters/cli.py`、`tests/`、`server/`、`README.md`、`README.zh-CN.md`、`docs/bac-tutorial.md`、`CHANGELOG.md`、`pyproject.toml`。避免实现完整区块链、上传完整 `.bac`、上传文件路径或 diff、引入复杂计费系统、多租户 RBAC 或修改 PyPI 发布流程。
 
-**Success Criteria:** `bac init` 支持选择 `local` 或 `hybrid` 模式，默认 `hybrid`；`bac anchor push` 可以向配置的服务端提交盲化 anchor 请求、接收 signed receipt 并追加 anchored checkpoint；`bac anchor request/import` 保留为离线或手动流程；`bac verify` 可以校验本地哈希链、receipt 签名、receipt 时间和 receipt 对应的 previous head；`./server` 可以用 Docker 启动，提供 anchor API、公钥查询、receipt 查询和后台页面；anchor 请求不包含项目名、路径、diff、actor、payload 或原始 `head_hash`；缺失或伪造 receipt 时验证失败或给出明确警告。
+**成功标准：** `bac init` 支持选择 `local` 或 `hybrid` 模式，默认 `hybrid`；`bac anchor push` 可以向配置的服务端提交盲化 anchor 请求、接收 signed receipt 并追加 anchored checkpoint；`bac anchor request/import` 保留为离线或手动流程；`bac verify` 可以校验本地哈希链、receipt 签名、receipt 时间和 receipt 对应的 previous head；`./server` 可以用 Docker 启动，提供 anchor API、公钥查询、receipt 查询和后台页面；anchor 请求不包含项目名、路径、diff、actor、payload 或原始 `head_hash`；缺失或伪造 receipt 时验证失败或给出明确警告。
 
-**Verification Plan:** 运行 `python -m pytest -q`；运行 CLI 端到端测试：初始化账本、记录事件、配置 hybrid 服务端、push anchor、保存 receipt、验证通过；运行服务端 API 测试：创建 anchor、查询 receipt、查询 public keys、验证签名；运行 Docker Compose smoke test：`docker compose -f server/docker-compose.yml up --build` 后健康检查通过；篡改 receipt 签名、anchor hash、previous head 后验证失败。
+**验证计划：** 运行 `python -m pytest -q`；运行 CLI 端到端测试：初始化账本、记录事件、配置 hybrid 服务端、push anchor、保存 receipt、验证通过；运行服务端 API 测试：创建 anchor、查询 receipt、查询 public keys、验证签名；运行 Docker Compose smoke test：`docker compose -f server/docker-compose.yml up --build` 后健康检查通过；篡改 receipt 签名、anchor hash、previous head 后验证失败。
 
 ---
 
-## Recommended Design
+## 推荐设计
 
 默认推荐实现 `local-first + private-anchor`，不是区块链，也不是把 `.bac` 上传到中心化平台。
 
@@ -81,7 +81,7 @@ anchor_hash = sha256(canonical_json({
 
 `ledger_nonce` 只保存在本地 `.bac` 或本地配置中。外部服务只看到随机样式的摘要和时间，不看到项目内容。
 
-## Client Modes
+## 客户端模式
 
 本地端需要把模式选择显式写入配置或 `.bac` manifest 的非敏感元数据中，避免用户误以为已经远程锚定。
 
@@ -102,7 +102,7 @@ CLI 行为：
 - `bac verify --require-anchor` 在审计场景强制要求至少一个有效远程 receipt。
 - `bac anchor request/import` 保留给离线提交、私有网络跳板或第三方服务集成。
 
-## Server Scope
+## 服务端范围
 
 `./server` 是官方可选服务端实现，目标是让用户能把 BAC 部署成“完整体”。
 
@@ -156,7 +156,7 @@ GET  /api/v1/ledgers/{ledger_id}/receipts
 - 通过环境变量配置 `BAC_ANCHOR_ADMIN_TOKEN`、`BAC_ANCHOR_DB_URL`、`BAC_ANCHOR_PRIVATE_KEY_PATH`、`BAC_ANCHOR_PUBLIC_BASE_URL`。
 - 服务端私钥只保存在服务端 volume 或外部 secret，不写入仓库。
 
-## Privacy Position
+## 隐私立场
 
 默认不上传：
 
@@ -178,7 +178,7 @@ GET  /api/v1/ledgers/{ledger_id}/receipts
 
 后台默认也只能展示服务端可见的最小数据。除非后续用户显式开启项目名或组织元数据上传，否则后台不应出现项目路径、仓库 URL、文件名、diff 或 prompt。
 
-## Threat Model
+## 威胁模型
 
 能防：
 
@@ -196,58 +196,58 @@ GET  /api/v1/ledgers/{ledger_id}/receipts
 - 创作者控制本机后删除本地 receipt；审计方应要求提交可验证 receipt 或查询透明日志。
 - 服务端管理员恶意删除数据库中的查询记录；本地已保存的 signed receipt 仍可离线验证，但在线查询连续性会受影响。后续透明日志可进一步增强。
 
-## Task: Anchor Data Model
+## 任务：锚定数据模型
 
-**Files:**
+**文件：**
 
-- Create: `src/bac/core/anchor.py`
-- Modify: `src/bac/core/schema.py`
-- Test: `tests/test_bac_core.py`
+- 新建：`src/bac/core/anchor.py`
+- 修改：`src/bac/core/schema.py`
+- 测试：`tests/test_bac_core.py`
 
-**Steps:**
+**步骤：**
 
 - 写 `compute_anchor_hash(head_hash, ledger_nonce)` 的失败测试，要求结果稳定、不是原始 head hash、输入变化后摘要变化。
 - 实现 anchor 请求、receipt 的最小结构校验。
 - 增加 receipt 与 checkpoint previous head 的绑定测试。
 
-## Task: Receipt Signature Verification
+## 任务：Receipt 签名验证
 
-**Files:**
+**文件：**
 
-- Modify: `pyproject.toml`
-- Modify: `src/bac/core/anchor.py`
-- Test: `tests/test_bac_core.py`
+- 修改：`pyproject.toml`
+- 修改：`src/bac/core/anchor.py`
+- 测试：`tests/test_bac_core.py`
 
-**Steps:**
+**步骤：**
 
 - 在 `pyproject.toml` 增加可选依赖 `anchor = ["cryptography>=42"]`。
 - 实现 Ed25519 receipt 签名验证。
 - 测试有效签名通过、错误 key、错误 signature、被改写 receipt 均失败。
 - 当未安装可选依赖时，给出明确错误，不静默当作通过。
 
-## Task: Anchored Checkpoint
+## 任务：锚定 Checkpoint
 
-**Files:**
+**文件：**
 
-- Modify: `src/bac/service/event_builder.py`
-- Modify: `src/bac/core/verify.py`
-- Test: `tests/test_bac_core.py`
+- 修改：`src/bac/service/event_builder.py`
+- 修改：`src/bac/core/verify.py`
+- 测试：`tests/test_bac_core.py`
 
-**Steps:**
+**步骤：**
 
 - 复用现有 `checkpoint` 事件，允许 payload/evidence 携带 `anchor_receipt`。
 - `bac verify` 检查 receipt 的 `anchor_hash` 是否等于 `prev_event_hash` 经 `ledger_nonce` 盲化后的结果。
 - `anchor_status` 细分为 `not_anchored`、`local_checkpoint`、`receipt_valid`、`receipt_invalid`。
 - 保持没有外部 receipt 的现有本地 checkpoint 兼容。
 
-## Task: CLI Workflow
+## 任务：CLI 工作流
 
-**Files:**
+**文件：**
 
-- Modify: `src/bac/adapters/cli.py`
-- Test: `tests/test_bac_core.py`
+- 修改：`src/bac/adapters/cli.py`
+- 测试：`tests/test_bac_core.py`
 
-**Steps:**
+**步骤：**
 
 - 新增 `bac anchor request --json`，输出可发送给服务端的最小 anchor request。
 - 新增 `bac anchor import --receipt-file receipt.json`，验证 receipt 后追加 anchored checkpoint。
@@ -256,17 +256,17 @@ GET  /api/v1/ledgers/{ledger_id}/receipts
 - 新增 `bac verify --require-anchor`，用于审计场景强制要求有效外部 receipt。
 - 端到端测试覆盖 local 模式、hybrid 模式、anchor request/import、anchor push、verify。
 
-## Task: Server API
+## 任务：服务端 API
 
-**Files:**
+**文件：**
 
-- Create: `server/app/main.py`
-- Create: `server/app/api/anchors.py`
-- Create: `server/app/signing/ed25519.py`
-- Create: `server/app/db/models.py`
-- Create: `server/tests/test_anchor_api.py`
+- 新建：`server/app/main.py`
+- 新建：`server/app/api/anchors.py`
+- 新建：`server/app/signing/ed25519.py`
+- 新建：`server/app/db/models.py`
+- 新建：`server/tests/test_anchor_api.py`
 
-**Steps:**
+**步骤：**
 
 - 实现 `GET /healthz`。
 - 实现 `GET /api/v1/public-keys`，返回当前验签所需的 public key 和 `key_id`。
@@ -274,16 +274,16 @@ GET  /api/v1/ledgers/{ledger_id}/receipts
 - 实现 `GET /api/v1/receipts/{receipt_id}`，供审计方查询服务端见过的 receipt。
 - 测试 receipt 签名可被本地端校验，重复 `anchor_hash + ledger_id + sequence` 行为明确且稳定。
 
-## Task: Server Storage and Key Management
+## 任务：服务端存储与密钥管理
 
-**Files:**
+**文件：**
 
-- Create: `server/app/db/session.py`
-- Create: `server/app/core/config.py`
-- Create: `server/app/signing/keys.py`
-- Test: `server/tests/test_key_management.py`
+- 新建：`server/app/db/session.py`
+- 新建：`server/app/core/config.py`
+- 新建：`server/app/signing/keys.py`
+- 测试：`server/tests/test_key_management.py`
 
-**Steps:**
+**步骤：**
 
 - 默认使用 SQLite 文件数据库，数据库路径来自 `BAC_ANCHOR_DB_URL`。
 - 支持通过环境变量或 mounted secret 加载 Ed25519 private key。
@@ -291,16 +291,16 @@ GET  /api/v1/ledgers/{ledger_id}/receipts
 - 记录 key rotation 元数据，但第一版只要求单 active key。
 - 确保 private key 不进入日志、response、`.bac` 或测试 fixture。
 
-## Task: Admin Console
+## 任务：管理后台
 
-**Files:**
+**文件：**
 
-- Create: `server/web/package.json`
-- Create: `server/web/src/`
-- Modify: `server/app/main.py`
-- Test: `server/tests/test_admin_static.py`
+- 新建：`server/web/package.json`
+- 新建：`server/web/src/`
+- 修改：`server/app/main.py`
+- 测试：`server/tests/test_admin_static.py`
 
-**Steps:**
+**步骤：**
 
 - 使用 React/Vite 构建现代化后台，并由 FastAPI 静态托管构建产物。
 - 首页展示服务健康、当前 key id、receipt 总数、最近锚定时间。
@@ -308,16 +308,16 @@ GET  /api/v1/ledgers/{ledger_id}/receipts
 - ledger 详情页展示匿名锚定时间线和 sequence 连续性。
 - 后台只读，第一版用 `BAC_ANCHOR_ADMIN_TOKEN` 做简单保护，不引入复杂 RBAC。
 
-## Task: Docker Deployment
+## 任务：Docker 部署
 
-**Files:**
+**文件：**
 
-- Create: `server/Dockerfile`
-- Create: `server/docker-compose.yml`
-- Create: `server/README.md`
-- Test: `server/tests/test_deployment_docs.py`
+- 新建：`server/Dockerfile`
+- 新建：`server/docker-compose.yml`
+- 新建：`server/README.md`
+- 测试：`server/tests/test_deployment_docs.py`
 
-**Steps:**
+**步骤：**
 
 - Dockerfile 构建 Python API 和前端静态资源。
 - Compose 默认启动单容器服务和 SQLite volume。
@@ -325,16 +325,16 @@ GET  /api/v1/ledgers/{ledger_id}/receipts
 - README 写清楚环境变量、key 生成、升级、备份和健康检查。
 - smoke test 至少覆盖容器启动后 `/healthz` 返回成功。
 
-## Task: Documentation
+## 任务：文档
 
-**Files:**
+**文件：**
 
-- Modify: `README.md`
-- Modify: `README.zh-CN.md`
-- Modify: `docs/bac-tutorial.md`
-- Modify: `CHANGELOG.md`
+- 修改：`README.md`
+- 修改：`README.zh-CN.md`
+- 修改：`docs/bac-tutorial.md`
+- 修改：`CHANGELOG.md`
 
-**Steps:**
+**步骤：**
 
 - 说明 BAC 仍是 tamper-evident，不表述为绝对不可篡改。
 - 增加 local 模式、hybrid 模式和 private-anchor 工作流示例。
@@ -342,11 +342,11 @@ GET  /api/v1/ledgers/{ledger_id}/receipts
 - 明确隐私边界：只发送盲化摘要，不上传内容和路径。
 - 明确外部锚定的证明含义：证明某个历史在某时间点已经存在，不证明所有真实操作都被记录。
 
-## Rollback
+## 回滚
 
 如果实现过程中发现签名依赖、CLI 体验或隐私边界不够清晰，先只合入 `anchor.py` 的纯本地数据模型和文档，不发布网络协议。若服务端实现风险超出预期，先发布本地端的 `anchor request/import` 和协议文档，把 `./server` 保持为实验性 preview，直到 receipt 验证、密钥管理、Docker 部署和隐私说明稳定。
 
-## Open Decisions
+## 待决问题
 
 - `ledger_nonce` 存在 `.bac` manifest、单独本地配置，还是两者都支持。
 - 是否默认启用 per-ledger pseudonymous key。

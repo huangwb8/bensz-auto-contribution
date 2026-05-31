@@ -212,11 +212,11 @@ bac verify --require-anchor
 
 - `declared`：声明型记录，例如人类需求或 AI 生成说明
 - `observed`：由工具观察到的事实，例如文件 hash、命令退出码、git diff 摘要
-- `signed`：预留给签名事件
+- `signed`：预留给签名事件；当前事件签名尚未实现，普通事件不能自称为 `signed`
 - `verified`：验证或 checkpoint 类事件
-- `anchored`：预留给外部锚定事件
+- `anchored`：仅用于带有效远程 receipt 的 checkpoint 事件
 
-当前默认规则是：`human` 和 `ai` 的普通贡献通常是 `declared`；文件变更、测试结果和工具命令通常是 `observed`；`checkpoint` 是 `verified`。
+当前默认规则是：`human` 和 `ai` 的普通贡献通常是 `declared`；文件变更、测试结果和工具命令通常是 `observed`；普通本地 `checkpoint` 是 `verified`。`bac record` 不允许直接创建 `signed` 或 `anchored`，其中 `anchored` 只能由 `bac anchor import` 或 `bac anchor push` 在 receipt 验签后生成。
 
 `created_at`
 
@@ -407,9 +407,25 @@ bac config set anchor.require true
 
 读取 `anchor.url`，向服务端发送 anchor request，接收 receipt，获取或使用指定 public key 验签，然后追加 anchored checkpoint。远程失败不会影响已经存在的本地记录。
 
+默认情况下，`anchor push` 只允许 `https://` 且非 loopback、link-local、private、multicast、reserved 的公网地址；域名会先解析 A/AAAA 记录，只要任一结果指向非公网地址就会拒绝，以降低 SSRF 和误发内网请求风险。本地开发时可以显式使用：
+
+```bash
+bac anchor push --allow-insecure-anchor-url
+```
+
+生产锚定服务如要求写入 token，可以使用：
+
+```bash
+bac anchor push --token "$BAC_ANCHOR_API_TOKEN"
+```
+
+也可以直接设置环境变量 `BAC_ANCHOR_API_TOKEN`。不要把 token 写入 `.bac` 配置或提交到仓库。
+
 `verify --require-anchor`
 
 强制要求至少存在一个有效远程 receipt。适用于正式审计；普通 `bac verify` 仍会允许纯本地账本通过或给出 warning。
+
+如果账本配置中存在 `anchor.require true`，即使命令行没有传 `--require-anchor`，`bac verify` 也会按正式审计语义要求有效远程 receipt。
 
 ## 哈希链原理
 
@@ -488,6 +504,7 @@ anchor_hash = sha256(canonical_json({
 
 - `.bac` 文件存在
 - `.bac` 是有效的 v2 ZIP 容器
+- `.bac` 容器总大小、事件数量和单个 JSON 成员大小在安全上限内
 - 容器包含 `manifest.json`
 - 内部路径没有重复条目
 - `events/` 事件文件名从 `000000000001.json` 开始连续递增
@@ -505,7 +522,9 @@ anchor_hash = sha256(canonical_json({
 - 每条事件正确连接到上一条事件
 - 同一账本内 `project.root_hash` 不变
 - checkpoint 的 `checkpointed_head_hash` 等于它自己的 `prev_event_hash`
+- `signed` trust level 不能在签名实现前被伪造
 - anchored checkpoint 的 receipt 绑定前序 head，且 Ed25519 签名有效
+- `anchored` trust level 只能出现在带有效远程 receipt 的 checkpoint 上
 
 验证结果有三种状态：
 

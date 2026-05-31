@@ -1,4 +1,4 @@
-# Initial `.bac` System Plan
+# 初始 `.bac` 系统计划
 
 ## 背景
 

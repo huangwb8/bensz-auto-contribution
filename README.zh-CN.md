@@ -144,8 +144,10 @@ bac verify --require-anchor
 
 ```bash
 bac config set anchor.url http://localhost:8080
-bac anchor push
+bac anchor push --allow-insecure-anchor-url
 ```
+
+`bac anchor push` 默认只允许安全的公网 `https://` 地址，并会检查域名解析结果是否指向私有或本地地址。显式的不安全开关仅用于本地开发。生产锚定服务如要求写入 token，可传 `--token` 或设置 `BAC_ANCHOR_API_TOKEN`；BAC 不会把该 token 写入 `.bac`。
 
 可选 reference server 位于 `server/`：
 
@@ -178,7 +180,7 @@ events/000000000002.json
 - `format`：当前为 `bac.event.v2`
 - `event_type`：如 `genesis`、`human_instruction`、`ai_generation`、`tool_command`、`file_change`、`test_result`、`checkpoint`
 - `source_type`：固定为 `human`、`ai`、`tool`、`system` 之一
-- `trust_level`：固定为 `declared`、`observed`、`signed`、`verified`、`anchored` 之一
+- `trust_level`：固定为 `declared`、`observed`、`signed`、`verified`、`anchored` 之一；`signed` 在事件签名实现前保留不可用，`anchored` 只对带有效远程 receipt 的 checkpoint 事件成立
 - `project`：项目根路径、项目绑定 hash、git remote、commit、branch 和 dirty 状态
 - `payload`：摘要、命令、文件快照或事件特定内容
 - `evidence`：diff 摘要、文件 hash、命令结果或其它可验证证据
@@ -196,6 +198,8 @@ BAC 是 **tamper-evident**，即篡改可发现；它不是 tamper-proof。
 它可以发现常见完整性问题，例如事件内容被编辑、事件缺失、事件重排、ZIP 内部路径重复、事件编号断裂、genesis 元数据不一致、哈希链断裂和 checkpoint 不一致。
 
 如果没有外部 anchor，纯本地哈希链不能完全防止尾部截断。因此 BAC 支持本地 checkpoint 和远程签名 receipt。有效 receipt 只能证明某个盲化账本 head 在服务端时间戳时已经存在；它不证明现实中的所有操作都被记录。
+
+验证器会把 `.bac` 文件视为不可信输入，在读取前限制容器总大小、事件数量和单个 JSON 成员大小。reference anchor server 在本地开发中保持易用，但生产模式要求 bearer token 保护写入、管理页面和账本 receipt 查询。
 
 ## 🧪 开发与验证
 

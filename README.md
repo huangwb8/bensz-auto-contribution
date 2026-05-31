@@ -144,8 +144,10 @@ For a configured service:
 
 ```bash
 bac config set anchor.url http://localhost:8080
-bac anchor push
+bac anchor push --allow-insecure-anchor-url
 ```
+
+`bac anchor push` allows only safe `https://` public URLs by default, including DNS resolution checks for private and local addresses. The explicit insecure flag is intended for local development only. For production anchor servers that require a write token, pass `--token` or set `BAC_ANCHOR_API_TOKEN`; BAC does not write that token into `.bac`.
 
 The optional reference service lives in `server/` and can be started with:
 
@@ -178,7 +180,7 @@ A BAC event includes:
 - `format`: currently `bac.event.v2`
 - `event_type`: examples include `genesis`, `human_instruction`, `ai_generation`, `tool_command`, `file_change`, `test_result`, and `checkpoint`
 - `source_type`: one of `human`, `ai`, `tool`, or `system`
-- `trust_level`: one of `declared`, `observed`, `signed`, `verified`, or `anchored`
+- `trust_level`: one of `declared`, `observed`, `signed`, `verified`, or `anchored`; `signed` is reserved until event signatures are implemented, and `anchored` is valid only for checkpoint events with a verified remote receipt
 - `project`: root path, project binding hash, git remote, commit, branch, and dirty state
 - `payload`: summary, command data, file snapshots, or event-specific content
 - `evidence`: diff summaries, file hashes, command results, or other verifiable evidence
@@ -196,6 +198,8 @@ BAC is **tamper-evident**, not tamper-proof.
 It can detect common integrity problems such as edited event content, missing events, reordered events, duplicated internal ZIP paths, broken event numbering, mismatched genesis metadata, invalid hash links, and checkpoint inconsistencies.
 
 Without an external anchor, a purely local hash chain cannot fully prevent tail truncation. BAC therefore supports local checkpoints and remote signed receipts. A valid receipt proves that a blinded ledger head existed at the service timestamp; it does not prove that every real-world action was recorded.
+
+The verifier treats `.bac` files as untrusted input: it bounds container size, event count, and JSON member size before reading. The reference anchor server is open for local development, but production mode requires bearer tokens for anchor writes, admin access, and ledger receipt queries.
 
 ## 🧪 Development
 

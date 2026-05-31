@@ -25,6 +25,18 @@ docker compose -f server/docker-compose.yml up --build
 
 The compose file uses SQLite in a named volume and development key generation for local smoke tests. For production, set `BAC_ANCHOR_ENV=production` and provide an Ed25519 private key through `BAC_ANCHOR_PRIVATE_KEY_PATH` or `BAC_ANCHOR_PRIVATE_KEY_B64`.
 
+Production deployments must also configure bearer tokens:
+
+```bash
+BAC_ANCHOR_API_TOKEN=change-me-write-token
+BAC_ANCHOR_ADMIN_TOKEN=change-me-admin-token
+BAC_ANCHOR_ENABLE_LEDGER_QUERY=false
+BAC_ANCHOR_MAX_BODY_BYTES=8192
+BAC_ANCHOR_RATE_LIMIT_PER_MINUTE=120
+```
+
+Use a reverse proxy or platform gateway for additional network-level rate limits and TLS termination. Do not store real tokens or private keys in the repository.
+
 To publish the server image directly to DockerHub as `linux/amd64`, use the local release script:
 
 ```bash
@@ -37,12 +49,14 @@ See [DockerHub Release](../docs/dockerhub-release.md) for Docker login, tag rule
 
 - `GET /healthz`
 - `GET /api/v1/public-keys`
-- `POST /api/v1/anchors`
-- `GET /api/v1/receipts/{receipt_id}`
-- `GET /api/v1/ledgers/{ledger_id}/receipts`
-- `GET /admin`
+- `POST /api/v1/anchors` requires `Authorization: Bearer $BAC_ANCHOR_API_TOKEN` in production
+- `GET /api/v1/receipts/{receipt_id}` remains public for callers that already know an opaque receipt id
+- `GET /api/v1/ledgers/{ledger_id}/receipts` is disabled by default in production; when enabled, it requires the API token
+- `GET /admin` requires `Authorization: Bearer $BAC_ANCHOR_ADMIN_TOKEN` in production, or returns 404 if no admin token is configured
 
 Receipt signatures use Ed25519 over canonical JSON signing payload `bac.anchor.receipt.signing_payload.v1`. Repeating the same `(anchor_hash, ledger_id, sequence)` returns the same receipt.
+
+Request bodies are bounded by `BAC_ANCHOR_MAX_BODY_BYTES`. Production anchor writes are additionally guarded by an in-process per-client rate limit suitable for the reference server. Client-side `bac anchor push` can send the production write token with `--token` or `BAC_ANCHOR_API_TOKEN`; do not store tokens in `.bac`.
 
 ## Privacy Boundary
 

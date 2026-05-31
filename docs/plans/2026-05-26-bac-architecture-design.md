@@ -1,18 +1,18 @@
-# BAC Architecture Design Implementation Plan
+# BAC 架构设计实施计划
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **给 Claude：** 必须使用子技能 `superpowers:executing-plans`，按任务逐步执行本计划。
 
-**Goal:** 设计 `bensz auto contribution` 的核心架构，使 AI 编程工具能够创建、追加、验证 `.bac` 贡献归因文件。
+**目标：** 设计 `bensz auto contribution` 的核心架构，使 AI 编程工具能够创建、追加、验证 `.bac` 贡献归因文件。
 
-**Architecture:** 采用“轻核心 + 多适配器”架构：核心层只负责 `.bac` schema、规范化序列化、哈希链、签名和验证；服务层负责事件构造、证据采集和敏感信息过滤；适配器层对接 CLI、AI tool、MCP 或编辑器插件。`.bac` 文件以追加式事件账本为中心，安全目标是 tamper-evident，而不是不可修改。
+**架构：** 采用“轻核心 + 多适配器”架构：核心层只负责 `.bac` schema、规范化序列化、哈希链、签名和验证；服务层负责事件构造、证据采集和敏感信息过滤；适配器层对接 CLI、AI tool、MCP 或编辑器插件。`.bac` 文件以追加式事件账本为中心，安全目标是 tamper-evident，而不是不可修改。
 
-**Tech Stack:** 初期语言栈待定；建议优先选择 TypeScript 或 Rust。数据格式建议使用 JSON Lines 或 CBOR Lines；哈希算法建议使用 SHA-256；签名算法建议使用 Ed25519；测试覆盖 schema、canonicalization、hash chain、signature、redaction 和异常输入。
+**技术栈：** 初期语言栈待定；建议优先选择 TypeScript 或 Rust。数据格式建议使用 JSON Lines 或 CBOR Lines；哈希算法建议使用 SHA-256；签名算法建议使用 Ed25519；测试覆盖 schema、canonicalization、hash chain、signature、redaction 和异常输入。
 
-**Minimal Change Scope:** 当前阶段只新增架构设计文档并更新变更记录；不实现代码、不确定最终语言栈、不引入运行时依赖。
+**最小变更范围：** 当前阶段只新增架构设计文档并更新变更记录；不实现代码、不确定最终语言栈、不引入运行时依赖。
 
-**Success Criteria:** 方案能清晰说明系统边界、分层架构、`.bac` 事件模型、验证流程、威胁模型、MVP 范围和后续演进路径。
+**成功标准：** 方案能清晰说明系统边界、分层架构、`.bac` 事件模型、验证流程、威胁模型、MVP 范围和后续演进路径。
 
-**Verification Plan:** 人工审阅本文档；后续实现阶段以 `bac init`、`bac record`、`bac verify`、`bac inspect` 的端到端用例作为最小验收。
+**验证计划：** 人工审阅本文档；后续实现阶段以 `bac init`、`bac record`、`bac verify`、`bac inspect` 的端到端用例作为最小验收。
 
 ---
 
@@ -62,33 +62,33 @@
 flowchart TB
   CALLER["AI 编程工具 / CLI / MCP / 编辑器插件"]
 
-  subgraph ADAPTER["Adapter Layer"]
+  subgraph ADAPTER["适配器层"]
     INPUT["输入解析"]
     DISPLAY["用户交互与展示"]
     BOUNDARY["权限边界"]
   end
 
-  subgraph SERVICE["BAC Service Layer"]
-    BUILDER["Event Builder"]
-    EVIDENCE["Evidence Collector"]
-    REDACTION["Redaction Policy"]
-    IDENTITY["Identity Provider"]
-    TRUST["Trust Assessor"]
+  subgraph SERVICE["BAC 服务层"]
+    BUILDER["事件构造器"]
+    EVIDENCE["证据采集器"]
+    REDACTION["脱敏策略"]
+    IDENTITY["身份提供器"]
+    TRUST["信任评估器"]
   end
 
-  subgraph CORE["BAC Core Layer"]
+  subgraph CORE["BAC 核心层"]
     SCHEMA["Schema"]
-    CANON["Canonicalizer"]
-    HASH["Hash Chain"]
-    SIGN["Signature"]
-    VERIFY["Verifier"]
-    MIGRATE["Migration"]
+    CANON["规范化器"]
+    HASH["哈希链"]
+    SIGN["签名"]
+    VERIFY["验证器"]
+    MIGRATE["迁移"]
   end
 
-  subgraph STORAGE["Storage Layer"]
-    LOCAL["Local .bac File"]
-    ANCHOR["Optional Remote Anchor"]
-    TIME["Optional Timestamp Service"]
+  subgraph STORAGE["存储层"]
+    LOCAL["本地 .bac 文件"]
+    ANCHOR["可选远程锚定"]
+    TIME["可选时间戳服务"]
   end
 
   CALLER --> INPUT --> BOUNDARY --> BUILDER
@@ -101,7 +101,7 @@ flowchart TB
   VERIFY --> DISPLAY
 ```
 
-## Adapter Layer
+## 适配器层
 
 适配器层负责把不同调用环境统一映射到内部服务接口。
 
@@ -127,11 +127,11 @@ bac migrate
 
 适配器层不直接计算安全关键字段。它只负责输入解析、权限边界、用户交互和展示。
 
-## BAC Service Layer
+## BAC 服务层
 
 服务层负责把“用户或 AI 请求”转成“可写入 `.bac` 的事件”。
 
-### Event Builder
+### 事件构造器
 
 负责构造事件对象，补齐时间戳、项目绑定、调用上下文和基础元数据。
 
@@ -156,7 +156,7 @@ anchored
 
 `source_type` 表示谁产生了事件；`trust_level` 表示这条事件目前可被信任到什么程度。
 
-### Evidence Collector
+### 证据采集器
 
 负责采集可验证证据。MVP 中建议支持：
 
@@ -171,7 +171,7 @@ anchored
 
 完整命令输出应默认截断或摘要化；敏感输出需要经过过滤。
 
-### Redaction Policy
+### 脱敏策略
 
 负责过滤不应写入 `.bac` 的内容。
 
@@ -185,7 +185,7 @@ anchored
 
 过滤策略应产生 `redaction` 元数据，说明哪些字段被替换、替换原因是什么，但不泄露原始敏感值。
 
-### Identity Provider
+### 身份提供器
 
 负责身份声明和签名。
 
@@ -196,11 +196,11 @@ MVP 可以支持两类身份：
 
 后续可扩展到 Git 签名、SSH 签名、Sigstore、OIDC、硬件密钥或组织身份系统。
 
-## BAC Core Layer
+## BAC 核心层
 
 核心层应尽量纯函数化，避免依赖终端、文件系统和具体 AI 工具。它应适合被 CLI、MCP server 和测试直接调用。
 
-### Schema
+### Schema 设计
 
 建议 `.bac` 文件采用 JSON Lines。每行是一条 canonical JSON 事件。
 
@@ -214,7 +214,7 @@ MVP 可以支持两类身份：
 
 如果未来需要更强的二进制稳定性，可以引入 CBOR Lines，但第一版不建议增加复杂度。
 
-### Canonicalizer
+### 规范化器
 
 哈希和签名必须基于稳定序列化结果。
 
@@ -229,7 +229,7 @@ MVP 可以支持两类身份：
 
 不要直接对用户输入的原始 JSON 字符串计算 hash，因为字段顺序和空白字符会导致不可复算。
 
-### Hash Chain
+### 哈希链
 
 每条事件包含前序摘要：
 
@@ -276,7 +276,7 @@ flowchart LR
 - 签名字段可验证。
 - 被引用文件摘要和当前文件是否匹配，或明确标记为历史状态。
 
-### Signature
+### 签名
 
 签名目标应是 canonical event payload。
 
@@ -301,7 +301,7 @@ MVP 可以允许未签名事件，但验证报告必须明确区分：
 - 签名存在但不可验证。
 - 签名有效。
 
-## Storage Layer
+## 存储层
 
 本地存储建议默认放在项目根目录：
 
@@ -347,7 +347,7 @@ project.bac
     "session_id": "..."
   },
   "payload": {
-    "summary": "Updated verification logic",
+    "summary": "更新验证逻辑",
     "files": [
       {
         "path": "src/verify.ts",
@@ -643,14 +643,14 @@ tests/
 
 ## 实施里程碑
 
-### Milestone A：格式和威胁模型
+### 里程碑 A：格式和威胁模型
 
 - 确定 `.bac` v1 schema。
 - 写出 threat model 文档。
 - 写出 canonicalization 规则。
 - 写出验证报告格式。
 
-### Milestone B：核心库
+### 里程碑 B：核心库
 
 - 实现 schema parse。
 - 实现 canonicalization。
@@ -658,7 +658,7 @@ tests/
 - 实现验证报告。
 - 添加核心测试。
 
-### Milestone C：本地 CLI
+### 里程碑 C：本地 CLI
 
 - 实现 `bac init`。
 - 实现 `bac record`。
@@ -666,7 +666,7 @@ tests/
 - 实现 `bac inspect`。
 - 添加端到端测试。
 
-### Milestone D：证据采集
+### 里程碑 D：证据采集
 
 - 采集 git 状态。
 - 采集文件 hash。
@@ -674,14 +674,14 @@ tests/
 - 采集命令执行结果。
 - 接入 redaction policy。
 
-### Milestone E：AI Tool 集成
+### 里程碑 E：AI Tool 集成
 
 - 设计 tool API。
 - 支持 AI 记录计划、生成、命令意图和验证结果。
 - 支持人类授权事件。
 - 增加示例项目。
 
-### Milestone F：签名和锚定
+### 里程碑 F：签名和锚定
 
 - 接入 Ed25519 签名。
 - 支持本地身份配置。

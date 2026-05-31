@@ -4,11 +4,21 @@
 
 ```
 github项目：huangwb8/bensz-auto-contribution
-version=1.2.0
-git-commit skill保存变更; 最后一个commit要新增 tag 为 v{version}，并且该commit信息要提到更新版本； git-publish-release skill 发布为一个release到github仓库。然后，基于本地pypi配置（不经过github action）发布到pypi上。
+version=1.2.1
+git-commit skill保存变更; 最后一个commit要新增 tag 为 v{version}，并且该commit信息要提到更新版本； git-publish-release skill 发布为一个release到github仓库。基于本地pypi配置（不经过github action）发布到pypi上。将最新的版本安装到本设备。
+```
+
+- 安全性问题
+
+```
+使用 auto-test-code skill 找出项目里存在的安全漏洞，然后利用 awesome-code skill 制定优化计划。
 ```
 
 # 日常
+
+---
+
+基于 docs/plans/2026-05-31-security-hardening-plan.md 优化源代码。 使用 awesome-code skill 辅助规划、优化。 不要破坏其它已经存在的功能。要保证最终成品能正常、稳定、高效地工作，让成品趋于完美。
 
 ---
 
