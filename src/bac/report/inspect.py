@@ -18,17 +18,22 @@ def timeline(
 ) -> list[dict[str, Any]]:
     filtered = filter_events(events, source_type=source_type, since=since, until=until, on=on)
     selected = filtered[-limit:] if limit else filtered
-    return [
-        {
+    items = []
+    for event in selected:
+        payload = event.get("payload", {})
+        provenance = payload.get("input_provenance") if isinstance(payload, dict) else None
+        item = {
             "created_at": event.get("created_at"),
             "event_type": event.get("event_type"),
             "source_type": event.get("source_type"),
             "trust_level": event.get("trust_level"),
-            "summary": event.get("payload", {}).get("summary", ""),
+            "summary": payload.get("summary", "") if isinstance(payload, dict) else "",
             "event_hash": event.get("event_hash"),
         }
-        for event in selected
-    ]
+        if isinstance(provenance, dict):
+            item["input_provenance"] = _input_provenance_summary(provenance)
+        items.append(item)
+    return items
 
 
 def filter_events(
@@ -109,3 +114,20 @@ def _parse_cli_datetime(raw: str, label: str) -> tuple[datetime, bool]:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc), False
+
+
+def _input_provenance_summary(provenance: dict[str, Any]) -> dict[str, Any]:
+    keys = (
+        "format",
+        "channel",
+        "host",
+        "session_id",
+        "message_index",
+        "message_hash",
+        "source_path",
+        "start_line",
+        "end_line",
+        "classification",
+        "recorded_full_text",
+    )
+    return {key: provenance[key] for key in keys if key in provenance}

@@ -115,8 +115,9 @@ class AnchorCoreTests(unittest.TestCase):
 
             report = verify_bac_file(bac_file)
 
-            self.assertEqual(report.status, "pass", report.errors)
+            self.assertEqual(report.status, "warn", report.errors)
             self.assertEqual(report.anchor_status, "receipt_valid")
+            self.assertTrue(any("human contributions may be underrecorded" in warning for warning in report.warnings))
 
     def test_cli_anchor_request_import_and_require_anchor(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -164,8 +165,9 @@ class AnchorCoreTests(unittest.TestCase):
             verify = _run_cli(root, env, "verify", "--require-anchor", "--json")
             report = json.loads(verify.stdout)
 
-            self.assertEqual(report["status"], "pass", report["errors"])
+            self.assertEqual(report["status"], "warn", report["errors"])
             self.assertEqual(report["anchor_status"], "receipt_valid")
+            self.assertTrue(any("human contributions may be underrecorded" in warning for warning in report["warnings"]))
             self.assertEqual(head_hash, report["anchored_head_hashes"][-1])
 
     def test_cli_verify_enforces_anchor_require_config(self) -> None:

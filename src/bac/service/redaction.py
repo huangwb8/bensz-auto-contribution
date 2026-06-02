@@ -14,8 +14,12 @@ SECRET_PATTERNS = [
     re.compile(r"\b(AKIA|ASIA)[0-9A-Z]{16}\b"),
     re.compile(r"\b(sk-[A-Za-z0-9_-]{20,})\b"),
     re.compile(r"\b(ghp_[A-Za-z0-9_]{20,})\b"),
+    re.compile(r"\b(gho_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,})\b"),
+    re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b"),
+    re.compile(r"(?i)([?&](?:access_token|api[_-]?key|token|secret|password)=)[^&\s]+"),
+    re.compile(r"(?i)\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b"),
     re.compile(
-        r"(?i)\b(api[_-]?key|token|secret|password|authorization|cookie)\b"
+        r"(?i)\b(api[_-]?key|access[_-]?token|token|secret|password|authorization|cookie|密码|令牌|密钥)\b"
         r"(\s*[:=]\s*|\s+)(['\"]?)[^\s'\";,]+"
     ),
 ]

@@ -20,6 +20,12 @@ from bac.core.container import (
 from bac.core.hash_chain import compute_event_hash, is_sha256
 from bac.core.schema import FORMAT_VERSION, parse_created_at, validate_event_schema, validate_event_source_policy
 
+HUMAN_INPUT_FORMAT = "bac.human_input.v1"
+HUMAN_INPUT_EVIDENCE_TYPES = {"human_input_message", "prompt_log_block"}
+HUMAN_INPUT_CLASSIFICATIONS = {"instruction", "review", "approval"}
+AI_ACTIVITY_EVENT_TYPES = {"ai_plan", "ai_generation"}
+FORBIDDEN_HUMAN_INPUT_TEXT_KEYS = {"full_text", "raw_text", "message", "prompt_text"}
+
 
 @dataclass
 class VerificationReport:
@@ -107,6 +113,8 @@ def verify_events(events: list[Any], require_anchor: bool = False) -> Verificati
     invalid_receipt_count = 0
     anchored_head_hashes: list[str] = []
     previous_event_hashes: set[str] = set()
+    has_ai_activity = False
+    has_human_input_provenance = False
 
     if not events:
         return VerificationReport(status="fail", errors=["BAC file contains no events"])
@@ -127,6 +135,10 @@ def verify_events(events: list[Any], require_anchor: bool = False) -> Verificati
             )
         )
         _validate_human_approval_reference(event, previous_event_hashes, errors)
+        if _validate_human_input_provenance(event, errors):
+            has_human_input_provenance = True
+        if _is_ai_activity(event):
+            has_ai_activity = True
         _append_semantic_warnings(event, warnings)
 
         expected_hash = compute_event_hash(event)
@@ -218,6 +230,8 @@ def verify_events(events: list[Any], require_anchor: bool = False) -> Verificati
 
     if checkpoint_count == 0:
         warnings.append("no checkpoint event found; tail truncation is not anchored")
+    if has_ai_activity and not has_human_input_provenance:
+        warnings.append("ledger has AI activity but no human input provenance; human contributions may be underrecorded")
     if require_anchor and anchor_status != "receipt_valid":
         errors.append("a valid remote anchor receipt is required but was not found")
 
@@ -290,6 +304,119 @@ def _validate_human_approval_reference(
         return
     if approved_hash not in previous_event_hashes:
         errors.append(f"event {event_id}: payload.approves_event_hash must reference a previous event_hash")
+
+
+def _validate_human_input_provenance(event: dict[str, Any], errors: list[str]) -> bool:
+    payload = event.get("payload")
+    if not isinstance(payload, dict):
+        return False
+    provenance = payload.get("input_provenance")
+    if provenance is None:
+        return False
+
+    event_id = event.get("event_id", "<unknown>")
+    if not isinstance(provenance, dict):
+        errors.append(f"event {event_id}: payload.input_provenance must be an object")
+        return False
+
+    _append_forbidden_human_input_text_errors(event_id, payload, "payload", errors)
+    evidence = event.get("evidence")
+    if isinstance(evidence, list):
+        _append_forbidden_human_input_text_errors(event_id, evidence, "evidence", errors)
+
+    if provenance.get("format") != HUMAN_INPUT_FORMAT:
+        errors.append(f"event {event_id}: input_provenance.format must be {HUMAN_INPUT_FORMAT}")
+    channel = provenance.get("channel")
+    if not isinstance(channel, str) or not channel:
+        errors.append(f"event {event_id}: input_provenance.channel must be a non-empty string")
+    message_hash = provenance.get("message_hash")
+    if not is_sha256(message_hash):
+        errors.append(f"event {event_id}: input_provenance.message_hash must be sha256:<hex>")
+    recorded_full_text = provenance.get("recorded_full_text")
+    if not isinstance(recorded_full_text, bool):
+        errors.append(f"event {event_id}: input_provenance.recorded_full_text must be a boolean")
+    elif recorded_full_text:
+        errors.append(f"event {event_id}: input_provenance.recorded_full_text must be false by default")
+    classification = provenance.get("classification")
+    if not isinstance(classification, str) or classification not in HUMAN_INPUT_CLASSIFICATIONS:
+        errors.append(f"event {event_id}: input_provenance.classification must be one of {sorted(HUMAN_INPUT_CLASSIFICATIONS)}")
+
+    if "source_path" in provenance:
+        source_path = provenance.get("source_path")
+        if not isinstance(source_path, str) or not source_path or Path(source_path).is_absolute() or ".." in Path(source_path).parts:
+            errors.append(f"event {event_id}: input_provenance.source_path must be a relative project path")
+    _validate_optional_positive_int(event_id, provenance, "message_index", errors)
+    _validate_line_range(event_id, provenance, errors)
+
+    if not isinstance(evidence, list):
+        return True
+    matching_evidence = [
+        item
+        for item in evidence
+        if isinstance(item, dict) and item.get("type") in HUMAN_INPUT_EVIDENCE_TYPES
+    ]
+    if not matching_evidence:
+        errors.append(f"event {event_id}: human input provenance requires human input evidence")
+        return True
+    for item in matching_evidence:
+        if item.get("message_hash") != message_hash:
+            errors.append(f"event {event_id}: human input evidence message_hash must match input_provenance.message_hash")
+        if item.get("redacted") is not True:
+            errors.append(f"event {event_id}: human input evidence must be marked redacted")
+        if "source_path" in item:
+            source_path = item.get("source_path")
+            if not isinstance(source_path, str) or not source_path or Path(source_path).is_absolute() or ".." in Path(source_path).parts:
+                errors.append(f"event {event_id}: human input evidence source_path must be a relative project path")
+        _validate_line_range(event_id, item, errors, label="human input evidence")
+    return True
+
+
+def _validate_optional_positive_int(
+    event_id: str,
+    value: dict[str, Any],
+    key: str,
+    errors: list[str],
+) -> None:
+    if key in value and (not isinstance(value.get(key), int) or value.get(key) < 1):
+        errors.append(f"event {event_id}: input_provenance.{key} must be a positive integer")
+
+
+def _validate_line_range(
+    event_id: str,
+    value: dict[str, Any],
+    errors: list[str],
+    label: str = "input_provenance",
+) -> None:
+    start = value.get("start_line")
+    end = value.get("end_line")
+    if start is None and end is None:
+        return
+    if not isinstance(start, int) or start < 1 or not isinstance(end, int) or end < start:
+        errors.append(f"event {event_id}: {label}.start_line/end_line must be positive and ordered")
+
+
+def _append_forbidden_human_input_text_errors(
+    event_id: str,
+    value: Any,
+    path: str,
+    errors: list[str],
+) -> None:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            item_path = f"{path}.{key}"
+            if key in FORBIDDEN_HUMAN_INPUT_TEXT_KEYS:
+                errors.append(f"event {event_id}: {item_path} must not store full human input text")
+            _append_forbidden_human_input_text_errors(event_id, item, item_path, errors)
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            _append_forbidden_human_input_text_errors(event_id, item, f"{path}[{index}]", errors)
+
+
+def _is_ai_activity(event: dict[str, Any]) -> bool:
+    event_type = event.get("event_type")
+    if isinstance(event_type, str) and event_type in AI_ACTIVITY_EVENT_TYPES:
+        return True
+    return event_type == "file_change" and event.get("source_type") == "ai"
 
 
 def _append_semantic_warnings(event: dict[str, Any], warnings: list[str]) -> None:

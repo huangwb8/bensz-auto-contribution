@@ -122,8 +122,9 @@ class BacCoreTests(unittest.TestCase):
             append_event(bac_file, checkpoint)
 
             report = verify_bac_file(bac_file)
-            self.assertEqual(report.status, "pass")
+            self.assertEqual(report.status, "warn")
             self.assertEqual(report.anchor_status, "local_checkpoint")
+            self.assertTrue(any("human contributions may be underrecorded" in warning for warning in report.warnings))
 
     def test_redaction_masks_secrets_and_records_metadata(self) -> None:
         redacted, metadata = redact_data({"command": "curl -H 'Authorization: sk-testsecret123456789012345'"})
@@ -380,7 +381,8 @@ class BacCoreTests(unittest.TestCase):
 
             report = verify_bac_file(bac_file)
 
-            self.assertEqual(report.status, "pass")
+            self.assertEqual(report.status, "warn")
+            self.assertTrue(any("human contributions may be underrecorded" in warning for warning in report.warnings))
 
     def test_verify_rejects_human_approval_of_missing_event_hash(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -560,6 +562,247 @@ class BacCoreTests(unittest.TestCase):
     def test_timeline_rejects_conflicting_date_filters(self) -> None:
         with self.assertRaisesRegex(ValueError, "--on cannot be combined"):
             timeline([], on="2026-05-31", since="2026-05-01")
+
+    def test_cli_records_human_input_without_full_prompt_and_is_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = _cli_env()
+            message_file = root / "user-message.txt"
+            message_text = "请优化 BAC 记录。token=super-secret-token\n不要保存完整 prompt。"
+            message_file.write_text(message_text, encoding="utf-8")
+
+            self.assertEqual(_run_bac(root, "init", "--mode", "local", "--json", env=env).returncode, 0)
+            first = _run_bac(
+                root,
+                "input",
+                "record",
+                "--channel",
+                "ai_tool_user_message",
+                "--host",
+                "codex",
+                "--session-id",
+                "s1",
+                "--message-index",
+                "1",
+                "--message-file",
+                str(message_file),
+                "--json",
+                env=env,
+            )
+
+            self.assertEqual(first.returncode, 0, first.stderr)
+            output = json.loads(first.stdout)
+            self.assertEqual(output["status"], "recorded")
+            self.assertEqual(output["skipped"], 0)
+
+            events = read_events(root / "project.bac")
+            self.assertEqual(len(events), 2)
+            event = events[-1]
+            self.assertEqual(event["source_type"], "human")
+            self.assertEqual(event["event_type"], "human_instruction")
+            provenance = event["payload"]["input_provenance"]
+            self.assertEqual(provenance["channel"], "ai_tool_user_message")
+            self.assertEqual(provenance["host"], "codex")
+            self.assertEqual(provenance["session_id"], "s1")
+            self.assertEqual(provenance["message_index"], 1)
+            self.assertTrue(provenance["message_hash"].startswith("sha256:"))
+            self.assertFalse(provenance["recorded_full_text"])
+            self.assertNotIn(message_text, json.dumps(event, ensure_ascii=False))
+            self.assertTrue(any(item.get("type") == "human_input_message" for item in event["evidence"]))
+
+            second = _run_bac(
+                root,
+                "input",
+                "record",
+                "--channel",
+                "ai_tool_user_message",
+                "--host",
+                "codex",
+                "--session-id",
+                "s1",
+                "--message-index",
+                "1",
+                "--message-file",
+                str(message_file),
+                "--json",
+                env=env,
+            )
+
+            self.assertEqual(second.returncode, 0, second.stderr)
+            duplicate = json.loads(second.stdout)
+            self.assertEqual(duplicate["status"], "skipped")
+            self.assertEqual(duplicate["skipped"], 1)
+            self.assertEqual(len(read_events(root / "project.bac")), 2)
+
+    def test_cli_imports_prompt_log_as_supplemental_human_input(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = _cli_env()
+            prompt_log = root / "Prompts.md"
+            prompt_log.write_text(
+                "\n".join(
+                    [
+                        "# Prompts",
+                        "",
+                        "请先审查实现是否正确，api_key=abc123secret。",
+                        "---",
+                        "```",
+                        "批准发布 release v1.2.3",
+                        "```",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            self.assertEqual(_run_bac(root, "init", "--mode", "local", "--json", env=env).returncode, 0)
+            result = _run_bac(root, "input", "import-log", "--source-file", "Prompts.md", "--json", env=env)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            output = json.loads(result.stdout)
+            self.assertEqual(output["status"], "imported")
+            self.assertEqual(output["recorded"], 2)
+            self.assertEqual(output["skipped"], 0)
+            events = read_events(root / "project.bac")
+            self.assertEqual(len(events), 3)
+            imported = events[1:]
+            self.assertTrue(all(event["source_type"] == "human" for event in imported))
+            self.assertTrue(all(event["payload"]["input_provenance"]["channel"] == "prompt_log" for event in imported))
+            self.assertTrue(all("source_path" in event["payload"]["input_provenance"] for event in imported))
+            self.assertNotIn("abc123secret", json.dumps(imported, ensure_ascii=False))
+
+            duplicate = _run_bac(root, "input", "import-log", "--source-file", "Prompts.md", "--json", env=env)
+
+            self.assertEqual(duplicate.returncode, 0, duplicate.stderr)
+            duplicate_output = json.loads(duplicate.stdout)
+            self.assertEqual(duplicate_output["status"], "skipped")
+            self.assertEqual(duplicate_output["recorded"], 0)
+            self.assertEqual(duplicate_output["skipped"], 2)
+            self.assertEqual(len(read_events(root / "project.bac")), 3)
+
+    def test_inspect_human_includes_input_provenance_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = _cli_env()
+            message_file = root / "user-message.txt"
+            message_file.write_text("请 review 这次修改可以吗？", encoding="utf-8")
+
+            self.assertEqual(_run_bac(root, "init", "--mode", "local", "--json", env=env).returncode, 0)
+            self.assertEqual(
+                _run_bac(
+                    root,
+                    "input",
+                    "record",
+                    "--host",
+                    "codex",
+                    "--session-id",
+                    "s1",
+                    "--message-index",
+                    "7",
+                    "--message-file",
+                    str(message_file),
+                    "--json",
+                    env=env,
+                ).returncode,
+                0,
+            )
+
+            result = _run_bac(root, "inspect", "--human", "--json", env=env)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            items = json.loads(result.stdout)
+            self.assertEqual(items[0]["event_type"], "human_review")
+            self.assertEqual(items[0]["input_provenance"]["channel"], "ai_tool_user_message")
+            self.assertEqual(items[0]["input_provenance"]["host"], "codex")
+            self.assertEqual(items[0]["input_provenance"]["classification"], "review")
+
+    def test_verify_validates_human_input_provenance_and_warns_when_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bac_file = root / "project.bac"
+            genesis = build_genesis_event(root)
+            initialize_bac_file(bac_file, genesis)
+            human_input = build_record_event(
+                root=root,
+                prev_event_hash=genesis["event_hash"],
+                event_type="human_instruction",
+                source_type="human",
+                summary="Recorded input",
+                payload={
+                    "input_provenance": {
+                        "format": "bac.human_input.v1",
+                        "channel": "ai_tool_user_message",
+                        "host": "codex",
+                        "session_id": "s1",
+                        "message_index": 1,
+                        "message_hash": "sha256:" + "1" * 64,
+                        "recorded_full_text": False,
+                        "classification": "instruction",
+                    }
+                },
+                evidence=[
+                    {
+                        "type": "human_input_message",
+                        "message_hash": "sha256:" + "1" * 64,
+                        "redacted": True,
+                        "excerpt": "Recorded input",
+                    }
+                ],
+            )
+            append_event(bac_file, human_input)
+
+            report = verify_bac_file(bac_file)
+
+            self.assertEqual(report.status, "warn")
+            self.assertFalse(any("input_provenance" in error for error in report.errors))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bac_file = root / "project.bac"
+            genesis = build_genesis_event(root)
+            initialize_bac_file(bac_file, genesis)
+            ai_event = build_record_event(
+                root=root,
+                prev_event_hash=genesis["event_hash"],
+                event_type="ai_generation",
+                source_type="ai",
+                summary="Generated code",
+            )
+            append_event(bac_file, ai_event)
+
+            report = verify_bac_file(bac_file)
+
+            self.assertEqual(report.status, "warn")
+            self.assertTrue(any("human contributions may be underrecorded" in warning for warning in report.warnings))
+
+    def test_verify_rejects_malformed_human_input_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bac_file = root / "project.bac"
+            genesis = build_genesis_event(root)
+            initialize_bac_file(bac_file, genesis)
+            event = build_record_event(
+                root=root,
+                prev_event_hash=genesis["event_hash"],
+                event_type="human_instruction",
+                source_type="human",
+                summary="Malformed input",
+                payload={
+                    "input_provenance": {
+                        "format": "wrong",
+                        "channel": "",
+                        "message_hash": "not-a-hash",
+                        "recorded_full_text": "false",
+                    }
+                },
+                evidence=[],
+            )
+            append_event(bac_file, event)
+
+            report = verify_bac_file(bac_file)
+
+            self.assertEqual(report.status, "fail")
+            self.assertTrue(any("input_provenance.format must be bac.human_input.v1" in error for error in report.errors))
+            self.assertTrue(any("input_provenance.message_hash must be sha256:<hex>" in error for error in report.errors))
 
     def test_cli_e2e(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -745,6 +988,22 @@ def _timeline_event(created_at: str, event_type: str, source_type: str, summary:
         "payload": {"summary": summary},
         "event_hash": "sha256:" + "0" * 64,
     }
+
+
+def _cli_env() -> dict[str, str]:
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1] / "src")
+    return env
+
+
+def _run_bac(root: Path, *args: str, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, "-m", "bac", "--root", str(root), *args],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
 
 
 if __name__ == "__main__":

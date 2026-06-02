@@ -30,9 +30,11 @@ from bac.report.inspect import timeline
 from bac.service.event_builder import (
     build_anchor_checkpoint_event,
     build_genesis_event,
+    build_human_input_event,
     build_record_event,
     default_actor,
 )
+from bac.service.evidence import parse_prompt_log_blocks
 from bac.storage.bac_file import DEFAULT_BAC_FILE, append_event, current_head_hash, initialize_bac_file, read_events
 
 
@@ -77,6 +79,22 @@ def build_parser() -> argparse.ArgumentParser:
     record.add_argument("--session-id")
     record.add_argument("--json", action="store_true", help="print machine-readable output")
     record.set_defaults(func=_cmd_record)
+
+    input_parser = subparsers.add_parser("input", help="record human input received by an AI tool host")
+    input_subparsers = input_parser.add_subparsers(dest="input_command", required=True)
+    input_record = input_subparsers.add_parser("record", help="append a redacted human input event")
+    input_record.add_argument("--channel", default="ai_tool_user_message")
+    input_record.add_argument("--host", help="AI tool host, such as codex or claude-code")
+    input_record.add_argument("--session-id")
+    input_record.add_argument("--message-index", type=int)
+    input_record.add_argument("--message-file", help="read the user message from a file; stdin is used when omitted")
+    input_record.add_argument("--classification", choices=["instruction", "review", "approval"])
+    input_record.add_argument("--json", action="store_true", help="print machine-readable output")
+    input_record.set_defaults(func=_cmd_input_record)
+    input_import = input_subparsers.add_parser("import-log", help="import redacted human input from a prompt log")
+    input_import.add_argument("--source-file", default="Prompts.md")
+    input_import.add_argument("--json", action="store_true", help="print machine-readable output")
+    input_import.set_defaults(func=_cmd_input_import_log)
 
     verify = subparsers.add_parser("verify", help="verify a BAC ledger")
     verify.add_argument("--require-anchor", action="store_true", help="fail unless a valid remote anchor receipt exists")
@@ -244,6 +262,116 @@ def _cmd_record(args: argparse.Namespace) -> int:
             "event_id": checkpoint["event_id"],
             "head_hash": checkpoint["event_hash"],
         }
+    _print_output(output, args.json)
+    return 0
+
+
+def _cmd_input_record(args: argparse.Namespace) -> int:
+    root = Path(args.root).resolve()
+    bac_path = _bac_path(root, args.bac_file)
+    events = read_events(bac_path)
+    if not events:
+        raise FileNotFoundError(f"BAC file is empty or missing: {bac_path}")
+    head_hash = events[-1].get("event_hash")
+    if not isinstance(head_hash, str):
+        raise ValueError("current BAC head is missing event_hash")
+
+    text = _read_message_text(args.message_file)
+    draft = build_human_input_event(
+        root=root,
+        prev_event_hash=head_hash,
+        text=text,
+        channel=args.channel,
+        host=args.host,
+        session_id=args.session_id,
+        message_index=args.message_index,
+        classification=args.classification,
+    )
+    existing = _find_human_input_event(events, _human_input_idempotency_key(draft))
+    if existing:
+        output = {
+            "status": "skipped",
+            "recorded": 0,
+            "skipped": 1,
+            "event_id": existing.get("event_id"),
+            "event_type": existing.get("event_type"),
+            "head_hash": head_hash,
+        }
+        _print_output(output, args.json)
+        return 0
+
+    append_event(bac_path, draft)
+    output = {
+        "status": "recorded",
+        "recorded": 1,
+        "skipped": 0,
+        "event_id": draft["event_id"],
+        "event_type": draft["event_type"],
+        "head_hash": draft["event_hash"],
+        "message_hash": draft["payload"]["input_provenance"]["message_hash"],
+        "redactions": draft["redactions"],
+    }
+    _maybe_auto_anchor(root, bac_path, events, output)
+    _print_output(output, args.json)
+    return 0
+
+
+def _cmd_input_import_log(args: argparse.Namespace) -> int:
+    root = Path(args.root).resolve()
+    bac_path = _bac_path(root, args.bac_file)
+    events = read_events(bac_path)
+    if not events:
+        raise FileNotFoundError(f"BAC file is empty or missing: {bac_path}")
+    source_path = _project_relative_path(root, args.source_file)
+    absolute_source = root / source_path
+    if not absolute_source.exists():
+        output = {
+            "status": "skipped",
+            "recorded": 0,
+            "skipped": 0,
+            "source_file": source_path.as_posix(),
+            "reason": "source_file_missing",
+            "head_hash": events[-1].get("event_hash"),
+        }
+        _print_output(output, args.json)
+        return 0
+
+    blocks = parse_prompt_log_blocks(absolute_source.read_text(encoding="utf-8"))
+    recorded = 0
+    skipped = 0
+    imported_events: list[dict[str, Any]] = []
+    known_events = list(events)
+    for block in blocks:
+        head_hash = known_events[-1].get("event_hash")
+        if not isinstance(head_hash, str):
+            raise ValueError("current BAC head is missing event_hash")
+        event = build_human_input_event(
+            root=root,
+            prev_event_hash=head_hash,
+            text=block["text"],
+            channel="prompt_log",
+            source_path=source_path.as_posix(),
+            start_line=block["start_line"],
+            end_line=block["end_line"],
+        )
+        if _find_human_input_event(known_events, _human_input_idempotency_key(event)):
+            skipped += 1
+            continue
+        append_event(bac_path, event)
+        known_events.append(event)
+        imported_events.append(event)
+        recorded += 1
+
+    output: dict[str, Any] = {
+        "status": "imported" if recorded else "skipped",
+        "recorded": recorded,
+        "skipped": skipped,
+        "source_file": source_path.as_posix(),
+        "head_hash": known_events[-1].get("event_hash"),
+        "event_ids": [event["event_id"] for event in imported_events],
+    }
+    if recorded:
+        _maybe_auto_anchor(root, bac_path, events, output)
     _print_output(output, args.json)
     return 0
 
@@ -517,6 +645,78 @@ def _validate_record_payload_against_ledger(
     }
     if approved_hash not in previous_hashes:
         raise ValueError("payload.approves_event_hash must reference an earlier event_hash in this ledger")
+
+
+def _read_message_text(message_file: str | None) -> str:
+    if message_file:
+        return Path(message_file).read_text(encoding="utf-8")
+    return sys.stdin.read()
+
+
+def _project_relative_path(root: Path, raw_path: str) -> Path:
+    project_root = root.resolve()
+    resolved = (project_root / raw_path).resolve()
+    try:
+        relative = resolved.relative_to(project_root)
+    except ValueError as exc:
+        raise ValueError(f"source-file is outside project root: {raw_path}") from exc
+    return relative
+
+
+def _human_input_idempotency_key(event: dict[str, Any]) -> tuple[Any, ...]:
+    provenance = _input_provenance(event)
+    if not provenance:
+        return ()
+    channel = provenance.get("channel")
+    if channel == "prompt_log":
+        return (
+            channel,
+            provenance.get("source_path"),
+            provenance.get("start_line"),
+            provenance.get("end_line"),
+            provenance.get("message_hash"),
+        )
+    return (
+        channel,
+        provenance.get("host"),
+        provenance.get("session_id"),
+        provenance.get("message_index"),
+        provenance.get("message_hash"),
+    )
+
+
+def _find_human_input_event(events: list[dict[str, Any]], key: tuple[Any, ...]) -> dict[str, Any] | None:
+    if not key:
+        return None
+    for event in events:
+        if _human_input_idempotency_key(event) == key:
+            return event
+    return None
+
+
+def _input_provenance(event: dict[str, Any]) -> dict[str, Any] | None:
+    payload = event.get("payload")
+    if not isinstance(payload, dict):
+        return None
+    provenance = payload.get("input_provenance")
+    return provenance if isinstance(provenance, dict) else None
+
+
+def _maybe_auto_anchor(
+    root: Path,
+    bac_path: Path,
+    events_before: list[dict[str, Any]],
+    output: dict[str, Any],
+) -> None:
+    config = _bac_config(events_before)
+    if not config.get("cloud.auto_anchor"):
+        return
+    checkpoint = _anchor_push_current(root, bac_path)
+    output["cloud_anchor"] = {
+        "status": "anchored",
+        "event_id": checkpoint["event_id"],
+        "head_hash": checkpoint["event_hash"],
+    }
 
 
 def _default_config_for_init(mode: str, anchor_url: str | None) -> dict[str, Any]:

@@ -18,7 +18,13 @@ from bac.core.schema import (
     TRUST_LEVELS,
     validate_event_source_policy,
 )
-from bac.service.evidence import collect_file_snapshots, collect_git_diff_evidence, collect_project_context
+from bac.service.evidence import (
+    build_human_input_evidence,
+    collect_file_snapshots,
+    collect_git_diff_evidence,
+    collect_project_context,
+    human_input_event_type,
+)
 from bac.service.redaction import redact_data
 
 
@@ -125,6 +131,46 @@ def build_anchor_checkpoint_event(
                 "anchor_receipt": anchor_receipt,
             }
         },
+    )
+
+
+def build_human_input_event(
+    *,
+    root: Path,
+    prev_event_hash: str,
+    text: str,
+    channel: str,
+    host: str | None = None,
+    session_id: str | None = None,
+    message_index: int | None = None,
+    classification: str | None = None,
+    source_path: str | None = None,
+    start_line: int | None = None,
+    end_line: int | None = None,
+    actor: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    summary, payload, evidence = build_human_input_evidence(
+        text=text,
+        channel=channel,
+        host=host,
+        session_id=session_id,
+        message_index=message_index,
+        classification=classification,
+        source_path=source_path,
+        start_line=start_line,
+        end_line=end_line,
+    )
+    provenance = payload["input_provenance"]
+    event_type = human_input_event_type(provenance["classification"])
+    return build_record_event(
+        root=root,
+        prev_event_hash=prev_event_hash,
+        event_type=event_type,
+        source_type="human",
+        summary=summary,
+        actor=actor or default_actor("human", "human"),
+        payload=payload,
+        evidence=evidence,
     )
 
 
