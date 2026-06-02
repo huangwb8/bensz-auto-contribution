@@ -4,16 +4,23 @@
 
 ## [Unreleased]
 
+## [1.2.4] - 2026-06-02
+
 ### Added（新增）
 
+- 新增人类输入记录主路径：`bac input record` 可在 AI tool 宿主收到用户消息时追加低敏 `source_type=human` 事件，记录 provenance、消息 hash、分类、脱敏摘要和 evidence，并支持幂等跳过重复消息。
+- 新增 prompt log 补充导入：`bac input import-log --source-file Prompts.md` 可从项目内 Markdown prompt log 导入脱敏人类输入证据，重复导入会跳过已记录区块。
+- `bac inspect --human --json` 新增 `input_provenance` 摘要输出，便于审计实时输入与补充导入来源。
 - 新增贡献来源漂白防护说明：中英文 README 与教程明确“批准不等于创作来源”，并补充 `human_approval.payload.approves_event_hash` 示例。
 
 ### Changed（变更）
 
 - 整理 BAC Anchor 部署目录职责：`docs/deploy` 仅保留可复制到服务器的 Compose 配置、环境变量示例和部署说明，部署/日志/备份/恢复辅助脚本迁移到 `tools/`。
+- 扩展敏感信息脱敏规则，覆盖更多 token、JWT、URL query 凭证、邮箱和中文密钥字段，并对人类输入消息 hash 做 BAC 域分离。
 
 ### Fixed（修复）
 
+- 修复 AI 编程会话中人类主动输入系统性漏记的问题：`bac verify` 会校验人类输入 provenance/evidence 结构，并在账本存在 AI 活动但没有人类输入 provenance 时给出 underrecording warning。
 - 加固 BAC 事件归因语义验证：拒绝 `ai_generation/source_type=human`、`human_approval/source_type=ai` 等明显来源矛盾，校验 `human_approval.payload.approves_event_hash` 只能指向同一账本前序事件，并让 CLI 在写入前拒绝无效批准引用。
 
 ## [1.2.3] - 2026-05-31
