@@ -23,6 +23,7 @@ from bac.core.anchor import (
     verify_anchor_receipt,
 )
 from bac.core.canonicalize import canonical_json
+from bac.core.hash_chain import is_sha256
 from bac.core.schema import EVENT_TYPES, SOURCE_TYPES, TRUST_LEVELS
 from bac.core.verify import verify_bac_file
 from bac.report.inspect import timeline
@@ -208,6 +209,7 @@ def _cmd_record(args: argparse.Namespace) -> int:
 
     payload = _json_object(args.payload_json, "payload-json") if args.payload_json else {}
     evidence = _json_list(args.evidence_json, "evidence-json") if args.evidence_json else []
+    _validate_record_payload_against_ledger(args.event_type, payload, events)
     actor = default_actor(
         args.actor_name or args.source_type,
         args.actor_kind or args.source_type,
@@ -496,6 +498,25 @@ def _json_list(raw: str, label: str) -> list[dict[str, Any]]:
     if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
         raise ValueError(f"{label} must be a JSON list of objects")
     return value
+
+
+def _validate_record_payload_against_ledger(
+    event_type: str,
+    payload: dict[str, Any],
+    events: list[dict[str, Any]],
+) -> None:
+    if event_type != "human_approval" or "approves_event_hash" not in payload:
+        return
+    approved_hash = payload.get("approves_event_hash")
+    if not is_sha256(approved_hash):
+        raise ValueError("payload.approves_event_hash must be sha256:<hex>")
+    previous_hashes = {
+        event.get("event_hash")
+        for event in events
+        if isinstance(event.get("event_hash"), str)
+    }
+    if approved_hash not in previous_hashes:
+        raise ValueError("payload.approves_event_hash must reference an earlier event_hash in this ledger")
 
 
 def _default_config_for_init(mode: str, anchor_url: str | None) -> dict[str, Any]:

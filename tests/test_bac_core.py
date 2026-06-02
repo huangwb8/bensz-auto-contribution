@@ -255,6 +255,227 @@ class BacCoreTests(unittest.TestCase):
             self.assertEqual(report.status, "fail")
             self.assertTrue(any("anchored trust_level requires a valid remote anchor receipt" in error for error in report.errors))
 
+    def test_verify_rejects_ai_generation_claimed_as_human(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bac_file = root / "project.bac"
+            genesis = build_genesis_event(root)
+            initialize_bac_file(bac_file, genesis)
+            record = build_record_event(
+                root=root,
+                prev_event_hash=genesis["event_hash"],
+                event_type="ai_generation",
+                source_type="ai",
+                summary="Generated implementation",
+            )
+            record["source_type"] = "human"
+            record = attach_event_hash(record)
+            append_event(bac_file, record)
+
+            report = verify_bac_file(bac_file)
+
+            self.assertEqual(report.status, "fail")
+            self.assertTrue(any("ai_generation must use source_type ai" in error for error in report.errors))
+
+    def test_verify_rejects_human_approval_claimed_as_ai(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bac_file = root / "project.bac"
+            genesis = build_genesis_event(root)
+            initialize_bac_file(bac_file, genesis)
+            approval = build_record_event(
+                root=root,
+                prev_event_hash=genesis["event_hash"],
+                event_type="human_approval",
+                source_type="human",
+                summary="Approved implementation",
+            )
+            approval["source_type"] = "ai"
+            approval = attach_event_hash(approval)
+            append_event(bac_file, approval)
+
+            report = verify_bac_file(bac_file)
+
+            self.assertEqual(report.status, "fail")
+            self.assertTrue(any("human_approval must use source_type human" in error for error in report.errors))
+
+    def test_verify_rejects_session_started_claimed_as_human(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bac_file = root / "project.bac"
+            genesis = build_genesis_event(root)
+            initialize_bac_file(bac_file, genesis)
+            session = build_record_event(
+                root=root,
+                prev_event_hash=genesis["event_hash"],
+                event_type="session_started",
+                source_type="system",
+                summary="Started session",
+            )
+            session["source_type"] = "human"
+            session = attach_event_hash(session)
+            append_event(bac_file, session)
+
+            report = verify_bac_file(bac_file)
+
+            self.assertEqual(report.status, "fail")
+            self.assertTrue(any("session_started must use source_type system" in error for error in report.errors))
+
+    def test_verify_rejects_file_snapshot_claimed_as_human(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bac_file = root / "project.bac"
+            genesis = build_genesis_event(root)
+            initialize_bac_file(bac_file, genesis)
+            snapshot = build_record_event(
+                root=root,
+                prev_event_hash=genesis["event_hash"],
+                event_type="file_snapshot",
+                source_type="tool",
+                summary="Captured file snapshot",
+            )
+            snapshot["source_type"] = "human"
+            snapshot = attach_event_hash(snapshot)
+            append_event(bac_file, snapshot)
+
+            report = verify_bac_file(bac_file)
+
+            self.assertEqual(report.status, "fail")
+            self.assertTrue(any("file_snapshot must use source_type tool" in error for error in report.errors))
+
+    def test_verify_accepts_human_approval_of_previous_ai_generation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bac_file = root / "project.bac"
+            genesis = build_genesis_event(root)
+            initialize_bac_file(bac_file, genesis)
+            ai_event = build_record_event(
+                root=root,
+                prev_event_hash=genesis["event_hash"],
+                event_type="ai_generation",
+                source_type="ai",
+                summary="Generated implementation",
+            )
+            append_event(bac_file, ai_event)
+            approval = build_record_event(
+                root=root,
+                prev_event_hash=ai_event["event_hash"],
+                event_type="human_approval",
+                source_type="human",
+                summary="Approved AI-generated implementation",
+                payload={
+                    "approves_event_hash": ai_event["event_hash"],
+                    "approval_scope": "accept_for_merge",
+                },
+            )
+            append_event(bac_file, approval)
+            checkpoint = build_record_event(
+                root=root,
+                prev_event_hash=approval["event_hash"],
+                event_type="checkpoint",
+                source_type="system",
+                summary="Local checkpoint",
+            )
+            append_event(bac_file, checkpoint)
+
+            report = verify_bac_file(bac_file)
+
+            self.assertEqual(report.status, "pass")
+
+    def test_verify_rejects_human_approval_of_missing_event_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bac_file = root / "project.bac"
+            genesis = build_genesis_event(root)
+            initialize_bac_file(bac_file, genesis)
+            approval = build_record_event(
+                root=root,
+                prev_event_hash=genesis["event_hash"],
+                event_type="human_approval",
+                source_type="human",
+                summary="Approved missing event",
+                payload={"approves_event_hash": "sha256:" + "f" * 64},
+            )
+            append_event(bac_file, approval)
+
+            report = verify_bac_file(bac_file)
+
+            self.assertEqual(report.status, "fail")
+            self.assertTrue(
+                any("payload.approves_event_hash must reference a previous event_hash" in error for error in report.errors)
+            )
+
+    def test_verify_warns_when_human_file_change_claims_ai_generated_content(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bac_file = root / "project.bac"
+            genesis = build_genesis_event(root)
+            initialize_bac_file(bac_file, genesis)
+            file_change = build_record_event(
+                root=root,
+                prev_event_hash=genesis["event_hash"],
+                event_type="file_change",
+                source_type="human",
+                summary="AI-generated implementation was written to src/app.py",
+            )
+            append_event(bac_file, file_change)
+            checkpoint = build_record_event(
+                root=root,
+                prev_event_hash=file_change["event_hash"],
+                event_type="checkpoint",
+                source_type="system",
+                summary="Local checkpoint",
+            )
+            append_event(bac_file, checkpoint)
+
+            report = verify_bac_file(bac_file)
+
+            self.assertEqual(report.status, "warn")
+            self.assertTrue(any("file_change/source_type=human" in warning for warning in report.warnings))
+
+    def test_verify_warns_on_actor_kind_source_type_conflict(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bac_file = root / "project.bac"
+            genesis = build_genesis_event(root)
+            initialize_bac_file(bac_file, genesis)
+            event = build_record_event(
+                root=root,
+                prev_event_hash=genesis["event_hash"],
+                event_type="human_review",
+                source_type="human",
+                summary="Reviewed change",
+                actor={"declared_name": "assistant", "declared_kind": "ai"},
+            )
+            append_event(bac_file, event)
+            checkpoint = build_record_event(
+                root=root,
+                prev_event_hash=event["event_hash"],
+                event_type="checkpoint",
+                source_type="system",
+                summary="Local checkpoint",
+            )
+            append_event(bac_file, checkpoint)
+
+            report = verify_bac_file(bac_file)
+
+            self.assertEqual(report.status, "warn")
+            self.assertTrue(any("actor.declared_kind ai conflicts with source_type human" in warning for warning in report.warnings))
+
+    def test_builder_rejects_contradictory_event_source_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            genesis = build_genesis_event(root)
+
+            with self.assertRaisesRegex(ValueError, "ai_generation must use source_type ai"):
+                build_record_event(
+                    root=root,
+                    prev_event_hash=genesis["event_hash"],
+                    event_type="ai_generation",
+                    source_type="human",
+                    summary="Misattributed AI output",
+                )
+
     def test_builder_rejects_unimplemented_signed_trust_level(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -354,6 +575,57 @@ class BacCoreTests(unittest.TestCase):
                 env=env,
             )
             self.assertEqual(init_result.returncode, 0, init_result.stderr)
+
+            invalid_result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "bac",
+                    "--root",
+                    str(root),
+                    "record",
+                    "--event-type",
+                    "ai_generation",
+                    "--source-type",
+                    "human",
+                    "--summary",
+                    "Misattributed AI output",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            self.assertEqual(invalid_result.returncode, 2)
+            self.assertIn("ai_generation must use source_type ai", invalid_result.stderr)
+            self.assertIn("human_approval/source_type=human", invalid_result.stderr)
+            self.assertEqual(len(read_events(root / "project.bac")), 1)
+
+            invalid_approval_result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "bac",
+                    "--root",
+                    str(root),
+                    "record",
+                    "--event-type",
+                    "human_approval",
+                    "--source-type",
+                    "human",
+                    "--summary",
+                    "Approve missing event",
+                    "--payload-json",
+                    json.dumps({"approves_event_hash": "sha256:" + "f" * 64}),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            self.assertEqual(invalid_approval_result.returncode, 2)
+            self.assertIn("payload.approves_event_hash must reference an earlier event_hash", invalid_approval_result.stderr)
+            self.assertEqual(len(read_events(root / "project.bac")), 1)
 
             record_result = subprocess.run(
                 [

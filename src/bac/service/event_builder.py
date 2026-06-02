@@ -10,7 +10,14 @@ from typing import Any
 
 from bac import __version__
 from bac.core.hash_chain import attach_event_hash
-from bac.core.schema import FORMAT_VERSION, EVENT_TYPES, SOURCE_TYPES, TRUST_LEVELS
+from bac.core.schema import (
+    ATTRIBUTION_REPAIR_HINT,
+    FORMAT_VERSION,
+    EVENT_TYPES,
+    SOURCE_TYPES,
+    TRUST_LEVELS,
+    validate_event_source_policy,
+)
 from bac.service.evidence import collect_file_snapshots, collect_git_diff_evidence, collect_project_context
 from bac.service.redaction import redact_data
 
@@ -186,6 +193,9 @@ def _validate_builder_input(event_type: str, source_type: str, trust_level: str)
         raise ValueError(f"unsupported event_type: {event_type}")
     if source_type not in SOURCE_TYPES:
         raise ValueError(f"unsupported source_type: {source_type}")
+    source_policy_errors = validate_event_source_policy(event_type, source_type)
+    if source_policy_errors:
+        raise ValueError(f"{source_policy_errors[0]}. {ATTRIBUTION_REPAIR_HINT}")
     if trust_level not in TRUST_LEVELS:
         raise ValueError(f"unsupported trust_level: {trust_level}")
     if trust_level == "signed":

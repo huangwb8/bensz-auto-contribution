@@ -4,9 +4,17 @@
 
 ## [Unreleased]
 
+### Added（新增）
+
+- 新增贡献来源漂白防护说明：中英文 README 与教程明确“批准不等于创作来源”，并补充 `human_approval.payload.approves_event_hash` 示例。
+
 ### Changed（变更）
 
 - 整理 BAC Anchor 部署目录职责：`docs/deploy` 仅保留可复制到服务器的 Compose 配置、环境变量示例和部署说明，部署/日志/备份/恢复辅助脚本迁移到 `tools/`。
+
+### Fixed（修复）
+
+- 加固 BAC 事件归因语义验证：拒绝 `ai_generation/source_type=human`、`human_approval/source_type=ai` 等明显来源矛盾，校验 `human_approval.payload.approves_event_hash` 只能指向同一账本前序事件，并让 CLI 在写入前拒绝无效批准引用。
 
 ## [1.2.3] - 2026-05-31
 

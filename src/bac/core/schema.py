@@ -27,6 +27,25 @@ EVENT_TYPES = {
     "checkpoint",
     "verification",
 }
+EVENT_SOURCE_POLICY = {
+    "genesis": "system",
+    "session_started": "system",
+    "human_instruction": "human",
+    "human_review": "human",
+    "human_approval": "human",
+    "ai_plan": "ai",
+    "ai_generation": "ai",
+    "tool_command": "tool",
+    "file_snapshot": "tool",
+    "test_result": "tool",
+    "checkpoint": "system",
+    "verification": "system",
+}
+ATTRIBUTION_REPAIR_HINT = (
+    "To record human adoption of AI work, record the AI-created content as "
+    "ai_generation/source_type=ai, then append human_approval/source_type=human "
+    "with payload.approves_event_hash."
+)
 
 REQUIRED_EVENT_FIELDS = {
     "format",
@@ -106,6 +125,15 @@ def validate_event_schema(event: Any, line_number: int | None = None) -> list[st
         errors.append(f"{prefix}signature must be null or an object")
 
     return errors
+
+
+def validate_event_source_policy(event_type: Any, source_type: Any, prefix: str = "") -> list[str]:
+    if event_type not in EVENT_TYPES or source_type not in SOURCE_TYPES:
+        return []
+    required_source = EVENT_SOURCE_POLICY.get(event_type)
+    if required_source is None or source_type == required_source:
+        return []
+    return [f"{prefix}{event_type} must use source_type {required_source}"]
 
 
 def parse_created_at(value: str) -> datetime:

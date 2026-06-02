@@ -182,6 +182,8 @@ BAC 是过程记录与辅助审计系统，不是最终贡献裁判。
 
 在 AI 辅助科研、写作和软件开发场景中，BAC 可以记录人类需求、约束、审阅、手写修改、最终批准，也可以记录 AI 草稿、重构建议、生成代码、命令输出、测试、引用检查、构建日志、文件快照和 diff 摘要。
 
+批准不等于创作来源。人类采纳 AI 产物时，应先记录 `ai_generation/source_type=ai`，再追加独立的 `human_approval/source_type=human` 事件。把 AI 生成内容或 AI 驱动的文件修改改写成人类创作，属于贡献来源漂白。
+
 这些记录可以支持 AI 使用披露、内部复核、合规说明和争议回溯。它不会自动判定学术署名、法律归属或最终责任；这些判断仍然需要结合项目制度、机构规则、期刊规范和人工判断。
 
 ## 📦 `.bac` 格式
@@ -200,13 +202,27 @@ events/000000000002.json
 
 - `format`：当前为 `bac.event.v2`
 - `event_type`：如 `genesis`、`human_instruction`、`ai_generation`、`tool_command`、`file_change`、`test_result`、`checkpoint`
-- `source_type`：固定为 `human`、`ai`、`tool`、`system` 之一
+- `source_type`：固定为 `human`、`ai`、`tool`、`system` 之一；它记录事件的直接来源，不是偏好的署名标签
 - `trust_level`：固定为 `declared`、`observed`、`signed`、`verified`、`anchored` 之一；`signed` 在事件签名实现前保留不可用，`anchored` 只对带有效远程 receipt 的 checkpoint 事件成立
 - `project`：项目根路径、项目绑定 hash、git remote、commit、branch 和 dirty 状态
 - `payload`：摘要、命令、文件快照或事件特定内容
 - `evidence`：diff 摘要、文件 hash、命令结果或其它可验证证据
 - `redactions`：被脱敏的字段与原因
 - `prev_event_hash` 与 `event_hash`：形成可验证哈希链
+
+人类批准 AI 或工具产物时，可以在 payload 中链接被批准事件：
+
+```json
+{
+  "event_type": "human_approval",
+  "source_type": "human",
+  "payload": {
+    "summary": "Human approved AI-generated implementation",
+    "approves_event_hash": "sha256:<previous-ai-event-hash>",
+    "approval_scope": "accept_for_merge"
+  }
+}
+```
 
 验证器会检查文件是否为有效 ZIP 容器、内部路径是否重复、事件编号是否连续、manifest 是否与 genesis 事件一致，以及事件哈希链是否可复算。
 
@@ -217,6 +233,8 @@ events/000000000002.json
 BAC 是 **tamper-evident**，即篡改可发现；它不是 tamper-proof。
 
 它可以发现常见完整性问题，例如事件内容被编辑、事件缺失、事件重排、ZIP 内部路径重复、事件编号断裂、genesis 元数据不一致、哈希链断裂和 checkpoint 不一致。
+
+它也会检查常见贡献来源漂白攻击的归因语义。例如 `ai_generation` 必须使用 `source_type=ai`，`human_approval` 必须使用 `source_type=human`，`tool_command` 与 `test_result` 必须使用 `source_type=tool`，`genesis`、`checkpoint`、`verification` 等系统事件必须使用 `source_type=system`。`human_approval.payload.approves_event_hash` 必须指向同一账本中的前序事件。
 
 如果没有外部 anchor，纯本地哈希链不能完全防止尾部截断。因此 BAC 支持本地 checkpoint 和远程签名 receipt。有效 receipt 只能证明某个盲化账本 head 在服务端时间戳时已经存在；它不证明现实中的所有操作都被记录。
 

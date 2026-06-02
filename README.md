@@ -182,6 +182,8 @@ BAC is a process record and audit aid, not a final judge of contribution ownersh
 
 In AI-assisted research, writing, and software projects, BAC can record human requirements, constraints, reviews, hand-written edits, final approvals, AI drafts, refactoring proposals, generated code, command outputs, tests, citation checks, build logs, file snapshots, and diff summaries.
 
+Approval is not authorship. If a human accepts AI-generated work, BAC should record the AI work as `ai_generation/source_type=ai` and then append a separate `human_approval/source_type=human` event. Rewriting AI generation or AI-driven file changes as human creation is treated as contribution source laundering.
+
 These records can support AI usage disclosure, internal review, compliance notes, and dispute reconstruction. They do not automatically determine academic authorship, legal ownership, or final responsibility. Those decisions still require project policy, institutional rules, journal guidelines, and human judgment.
 
 ## 📦 `.bac` Format
@@ -200,13 +202,27 @@ A BAC event includes:
 
 - `format`: currently `bac.event.v2`
 - `event_type`: examples include `genesis`, `human_instruction`, `ai_generation`, `tool_command`, `file_change`, `test_result`, and `checkpoint`
-- `source_type`: one of `human`, `ai`, `tool`, or `system`
+- `source_type`: one of `human`, `ai`, `tool`, or `system`; it records the direct source of this event, not a preferred credit label
 - `trust_level`: one of `declared`, `observed`, `signed`, `verified`, or `anchored`; `signed` is reserved until event signatures are implemented, and `anchored` is valid only for checkpoint events with a verified remote receipt
 - `project`: root path, project binding hash, git remote, commit, branch, and dirty state
 - `payload`: summary, command data, file snapshots, or event-specific content
 - `evidence`: diff summaries, file hashes, command results, or other verifiable evidence
 - `redactions`: fields removed or masked for safety
 - `prev_event_hash` and `event_hash`: the verifiable hash chain
+
+Human approval of earlier AI or tool work can be linked in payload:
+
+```json
+{
+  "event_type": "human_approval",
+  "source_type": "human",
+  "payload": {
+    "summary": "Human approved AI-generated implementation",
+    "approves_event_hash": "sha256:<previous-ai-event-hash>",
+    "approval_scope": "accept_for_merge"
+  }
+}
+```
 
 The verifier checks whether the file is a valid ZIP container, whether internal paths are duplicated, whether event numbering is continuous, whether the manifest matches the genesis event, and whether the hash chain can be recomputed.
 
@@ -217,6 +233,8 @@ For a field-by-field walkthrough, see [BAC Tutorial](docs/bac-tutorial.md).
 BAC is **tamper-evident**, not tamper-proof.
 
 It can detect common integrity problems such as edited event content, missing events, reordered events, duplicated internal ZIP paths, broken event numbering, mismatched genesis metadata, invalid hash links, and checkpoint inconsistencies.
+
+It also checks attribution semantics for common source laundering attacks. For example, `ai_generation` must use `source_type=ai`, `human_approval` must use `source_type=human`, `tool_command` and `test_result` must use `source_type=tool`, and system events such as `genesis`, `checkpoint`, and `verification` must use `source_type=system`. A `human_approval.payload.approves_event_hash` value must point to an earlier event in the same ledger.
 
 Without an external anchor, a purely local hash chain cannot fully prevent tail truncation. BAC therefore supports local checkpoints and remote signed receipts. A valid receipt proves that a blinded ledger head existed at the service timestamp; it does not prove that every real-world action was recorded.
 

@@ -206,6 +206,24 @@ bac verify --require-anchor
 - `tool`：命令、测试、格式化器、linter、git 等工具输出
 - `system`：BAC 工具自身或运行环境产生的系统事件
 
+`source_type` 记录直接来源，不是偏好的署名标签。人类批准、合并或授权 AI 产物时，不应把 AI 生成内容改写为 `human`；正确做法是保留一条 `ai_generation/source_type=ai`，再追加一条 `human_approval/source_type=human`。这种把 AI 或工具实际产物伪装为人类创作的做法称为贡献来源漂白。
+
+`human_approval` 可以用 payload 链接被批准的前序事件：
+
+```json
+{
+  "event_type": "human_approval",
+  "source_type": "human",
+  "payload": {
+    "summary": "Human approved AI-generated implementation",
+    "approves_event_hash": "sha256:<previous-ai-event-hash>",
+    "approval_scope": "accept_for_merge"
+  }
+}
+```
+
+其中 `approves_event_hash` 必须指向同一账本中已经存在的前序事件。批准事实不会改变被批准事件的创作来源。
+
 `trust_level`
 
 信任等级，描述这条记录的可信依据。当前支持：
@@ -536,6 +554,8 @@ anchor_hash = sha256(canonical_json({
 - 每条事件都是 JSON object
 - 必填字段齐全
 - `format`、`event_type`、`source_type`、`trust_level` 合法
+- `event_type` 与 `source_type` 的语义不冲突，例如 `ai_generation` 必须来自 `ai`，`human_approval` 必须来自 `human`
+- `human_approval.payload.approves_event_hash` 如存在，必须指向同一账本中的前序事件
 - `created_at` 是 UTC 时间
 - `project` 字段结构合法
 - `prev_event_hash` 和 `event_hash` 是 `sha256:<64位hex>` 或允许的 `null`
@@ -617,6 +637,8 @@ human_review：用户或维护者审阅意见
 human_approval：最终授权或确认
 checkpoint：记录当前账本 head
 ```
+
+如果人类最终采纳的是 AI 产物，推荐让 `human_approval.payload.approves_event_hash` 指向对应 `ai_generation` 的 `event_hash`。这样 `bac inspect --human` 会展示人类需求、审阅和批准事实，但不会把 AI 生成事件混入人类创作来源。
 
 不要把以下内容直接写进 `.bac`：
 
