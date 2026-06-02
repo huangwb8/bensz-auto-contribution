@@ -82,6 +82,22 @@ bac record \
   --summary "Add BAC verification workflow"
 ```
 
+AI tool hosts should record the user message as soon as it is received. This is the primary path for capturing human intent without storing the full private prompt:
+
+```bash
+bac input record \
+  --host codex \
+  --session-id s1 \
+  --message-index 1 \
+  --message-file /tmp/user-message.txt
+```
+
+Prompt logs such as `Prompts.md` are only supplemental evidence for backfill or cross-checking:
+
+```bash
+bac input import-log --source-file Prompts.md
+```
+
 Record AI generation or implementation intent:
 
 ```bash
@@ -133,7 +149,7 @@ bac inspect --source-type human --since 2026-05-01 --until 2026-05-31 --json
 
 Date-only `--since`, `--until`, and `--on` values are interpreted as UTC calendar dates. `--until 2026-05-31` includes events through the end of that UTC date; pass an ISO-8601 timestamp for an exact boundary.
 
-All commands support `--root` for the target project root and `--bac-file` for a custom `.bac` path. `init`, `record`, `verify`, and `inspect` also support `--json` for machine-readable output.
+All commands support `--root` for the target project root and `--bac-file` for a custom `.bac` path. `init`, `record`, `input`, `verify`, and `inspect` also support `--json` for machine-readable output.
 
 ### Private Anchor Workflow
 
@@ -181,6 +197,10 @@ docker compose -f server/docker-compose.yml up --build
 BAC is a process record and audit aid, not a final judge of contribution ownership.
 
 In AI-assisted research, writing, and software projects, BAC can record human requirements, constraints, reviews, hand-written edits, final approvals, AI drafts, refactoring proposals, generated code, command outputs, tests, citation checks, build logs, file snapshots, and diff summaries.
+
+For AI coding sessions, the most reliable human-input source is the user message submitted to the AI tool host. `bac input record` writes a `source_type=human` event with a summary, redacted excerpt, provenance channel, optional host/session/index, and a domain-separated message hash. It does not store the full prompt by default. A message hash is useful audit evidence, but it is not a zero-leakage privacy guarantee for short or guessable prompts.
+
+If a user pastes logs, web text, generated code, or other third-party material into a prompt, BAC records that the human submitted that context. It does not automatically claim that every pasted fragment was authored by the human.
 
 Approval is not authorship. If a human accepts AI-generated work, BAC should record the AI work as `ai_generation/source_type=ai` and then append a separate `human_approval/source_type=human` event. Rewriting AI generation or AI-driven file changes as human creation is treated as contribution source laundering.
 
@@ -235,6 +255,8 @@ BAC is **tamper-evident**, not tamper-proof.
 It can detect common integrity problems such as edited event content, missing events, reordered events, duplicated internal ZIP paths, broken event numbering, mismatched genesis metadata, invalid hash links, and checkpoint inconsistencies.
 
 It also checks attribution semantics for common source laundering attacks. For example, `ai_generation` must use `source_type=ai`, `human_approval` must use `source_type=human`, `tool_command` and `test_result` must use `source_type=tool`, and system events such as `genesis`, `checkpoint`, and `verification` must use `source_type=system`. A `human_approval.payload.approves_event_hash` value must point to an earlier event in the same ledger.
+
+For human input events, `bac verify` checks the `payload.input_provenance` and matching redacted evidence. If a ledger has AI activity but no human input provenance, verification returns a warning because human contributions may be underrecorded.
 
 Without an external anchor, a purely local hash chain cannot fully prevent tail truncation. BAC therefore supports local checkpoints and remote signed receipts. A valid receipt proves that a blinded ledger head existed at the service timestamp; it does not prove that every real-world action was recorded.
 

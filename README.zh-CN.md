@@ -82,6 +82,22 @@ bac record \
   --summary "Add BAC verification workflow"
 ```
 
+AI tool 宿主应在收到用户输入框消息时立即记录人类输入。这是捕捉人类意图的主路径，默认不保存完整私有 prompt：
+
+```bash
+bac input record \
+  --host codex \
+  --session-id s1 \
+  --message-index 1 \
+  --message-file /tmp/user-message.txt
+```
+
+`Prompts.md` 等 prompt log 只是补录或交叉验证用的补充证据：
+
+```bash
+bac input import-log --source-file Prompts.md
+```
+
 记录 AI 生成或实现意图：
 
 ```bash
@@ -133,7 +149,7 @@ bac inspect --source-type human --since 2026-05-01 --until 2026-05-31 --json
 
 日期形式的 `--since`、`--until` 和 `--on` 按 UTC 自然日解释。`--until 2026-05-31` 会包含该 UTC 日期结束前的事件；如需精确边界，可传 ISO-8601 时间戳。
 
-所有命令都支持 `--root` 指定目标项目根目录，支持 `--bac-file` 指定自定义 `.bac` 路径。`init`、`record`、`verify`、`inspect` 均支持 `--json` 输出，便于 AI tool 或其它自动化流程调用。
+所有命令都支持 `--root` 指定目标项目根目录，支持 `--bac-file` 指定自定义 `.bac` 路径。`init`、`record`、`input`、`verify`、`inspect` 均支持 `--json` 输出，便于 AI tool 或其它自动化流程调用。
 
 ### 隐私保护锚定流程
 
@@ -181,6 +197,10 @@ docker compose -f server/docker-compose.yml up --build
 BAC 是过程记录与辅助审计系统，不是最终贡献裁判。
 
 在 AI 辅助科研、写作和软件开发场景中，BAC 可以记录人类需求、约束、审阅、手写修改、最终批准，也可以记录 AI 草稿、重构建议、生成代码、命令输出、测试、引用检查、构建日志、文件快照和 diff 摘要。
+
+在 AI 编程会话中，最稳定的一手人类输入来源是用户提交给 AI tool 宿主的消息。`bac input record` 会写入 `source_type=human` 事件，包含摘要、脱敏摘录、来源通道、可选 host/session/index，以及带 BAC 域分离的消息 hash。它默认不保存完整 prompt。消息 hash 是有用的审计证据，但对短 prompt 或容易猜测的 prompt 并不是零泄露隐私保证。
+
+如果用户把日志、网页文本、生成代码或其它第三方材料粘贴进 prompt，BAC 记录的是“人类提交了这些上下文”，不会自动声明被粘贴片段都由人类原创。
 
 批准不等于创作来源。人类采纳 AI 产物时，应先记录 `ai_generation/source_type=ai`，再追加独立的 `human_approval/source_type=human` 事件。把 AI 生成内容或 AI 驱动的文件修改改写成人类创作，属于贡献来源漂白。
 
@@ -235,6 +255,8 @@ BAC 是 **tamper-evident**，即篡改可发现；它不是 tamper-proof。
 它可以发现常见完整性问题，例如事件内容被编辑、事件缺失、事件重排、ZIP 内部路径重复、事件编号断裂、genesis 元数据不一致、哈希链断裂和 checkpoint 不一致。
 
 它也会检查常见贡献来源漂白攻击的归因语义。例如 `ai_generation` 必须使用 `source_type=ai`，`human_approval` 必须使用 `source_type=human`，`tool_command` 与 `test_result` 必须使用 `source_type=tool`，`genesis`、`checkpoint`、`verification` 等系统事件必须使用 `source_type=system`。`human_approval.payload.approves_event_hash` 必须指向同一账本中的前序事件。
+
+对于人类输入事件，`bac verify` 会校验 `payload.input_provenance` 和配套的脱敏 evidence。若账本存在 AI 活动但没有任何人类输入 provenance，验证会给出 warning，提示人类贡献可能被漏记。
 
 如果没有外部 anchor，纯本地哈希链不能完全防止尾部截断。因此 BAC 支持本地 checkpoint 和远程签名 receipt。有效 receipt 只能证明某个盲化账本 head 在服务端时间戳时已经存在；它不证明现实中的所有操作都被记录。
 

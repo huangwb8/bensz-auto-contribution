@@ -55,6 +55,22 @@ bac record \
   --summary "用户要求添加 BAC 验证流程"
 ```
 
+AI tool 宿主收到用户输入框消息时，应优先用 `bac input record` 记录低敏人类输入证据：
+
+```bash
+bac input record \
+  --host codex \
+  --session-id s1 \
+  --message-index 1 \
+  --message-file /tmp/user-message.txt
+```
+
+历史 `Prompts.md`、聊天导出或 issue/PR 评论可以作为补充导入来源，但不应成为系统正确性的前提：
+
+```bash
+bac input import-log --source-file Prompts.md
+```
+
 记录 AI 生成或修改：
 
 ```bash
@@ -399,6 +415,24 @@ bac record \
 
 设置 actor 信息。不传时，`actor-name` 和 `actor-kind` 默认使用 `source_type`。
 
+`input record`
+
+记录 AI tool 宿主刚收到的用户输入。它会生成 `source_type=human` 事件，并自动写入：
+
+- `payload.input_provenance.format = bac.human_input.v1`
+- `channel`，默认是 `ai_tool_user_message`
+- 可选 `host`、`session_id` 和 `message_index`
+- `message_hash`，基于 BAC 域分离后的规范化文本计算
+- `recorded_full_text = false`
+- `classification`，可为 `instruction`、`review` 或显式 `approval`
+- 脱敏 `summary` 和脱敏 `excerpt`
+
+默认不会保存完整 prompt。`message_hash` 可用于审计和幂等跳过，但短 prompt 或容易猜测的 prompt 仍可能被字典验证，因此它不是零泄露隐私保证。
+
+`input import-log`
+
+从项目内 prompt log 补充导入人类输入证据。`--source-file` 必须位于项目根目录内，写入 `.bac` 时只记录相对路径、行号、消息 hash 和脱敏摘录。重复导入同一来源区块会被跳过。
+
 `--json`
 
 让命令输出 machine-readable JSON，方便 AI tool 或脚本调用。
@@ -556,6 +590,7 @@ anchor_hash = sha256(canonical_json({
 - `format`、`event_type`、`source_type`、`trust_level` 合法
 - `event_type` 与 `source_type` 的语义不冲突，例如 `ai_generation` 必须来自 `ai`，`human_approval` 必须来自 `human`
 - `human_approval.payload.approves_event_hash` 如存在，必须指向同一账本中的前序事件
+- 人类输入事件的 `payload.input_provenance` 格式、通道、消息 hash、`recorded_full_text` 和配套脱敏 evidence 结构合法
 - `created_at` 是 UTC 时间
 - `project` 字段结构合法
 - `prev_event_hash` 和 `event_hash` 是 `sha256:<64位hex>` 或允许的 `null`
@@ -572,7 +607,7 @@ anchor_hash = sha256(canonical_json({
 验证结果有三种状态：
 
 - `pass`：没有错误和警告
-- `warn`：没有错误，但有警告，例如缺少 checkpoint
+- `warn`：没有错误，但有警告，例如缺少 checkpoint，或存在 AI 活动但没有任何人类输入 provenance
 - `fail`：存在错误，例如 hash 不匹配或链条断裂
 
 ## Inspect 时间线
@@ -592,6 +627,8 @@ anchor_hash = sha256(canonical_json({
 - `source_type/trust_level`
 - `payload.summary`
 
+使用 `--json` 时，带 `payload.input_provenance` 的人类事件会额外展示输入来源摘要，例如 `channel`、`host`、`source_path`、行号、`classification` 和 `message_hash`。
+
 ## 当前安全边界
 
 当前 BAC v2 已支持：
@@ -607,6 +644,7 @@ anchor_hash = sha256(canonical_json({
 - 文件快照 hash
 - git diff 摘要证据
 - 本地 checkpoint
+- 人类输入 provenance 与 prompt log 补充导入
 - 隐私保护 anchor request/import/push
 - Ed25519 receipt 验签
 - 敏感信息脱敏
@@ -627,6 +665,7 @@ anchor_hash = sha256(canonical_json({
 一次较完整的 AI 协作开发可以记录为：
 
 ```text
+bac input record：用户提交给 AI tool 的低敏输入证据
 human_instruction：用户需求和约束
 ai_plan：AI 的实现计划
 ai_generation：AI 生成或修改的内容摘要
@@ -639,6 +678,8 @@ checkpoint：记录当前账本 head
 ```
 
 如果人类最终采纳的是 AI 产物，推荐让 `human_approval.payload.approves_event_hash` 指向对应 `ai_generation` 的 `event_hash`。这样 `bac inspect --human` 会展示人类需求、审阅和批准事实，但不会把 AI 生成事件混入人类创作来源。
+
+如果用户粘贴了日志、网页内容、AI 生成片段或第三方代码，`bac input record` 只表示“人类选择并提交了这些上下文”，不自动证明被粘贴材料由人类原创。
 
 不要把以下内容直接写进 `.bac`：
 
