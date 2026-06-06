@@ -126,6 +126,33 @@ class BacCoreTests(unittest.TestCase):
             self.assertEqual(report.anchor_status, "local_checkpoint")
             self.assertTrue(any("human contributions may be underrecorded" in warning for warning in report.warnings))
 
+    def test_append_rejects_event_built_from_stale_head(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bac_file = root / "project.bac"
+            genesis = build_genesis_event(root)
+            initialize_bac_file(bac_file, genesis)
+            first = build_record_event(
+                root=root,
+                prev_event_hash=genesis["event_hash"],
+                event_type="ai_generation",
+                source_type="ai",
+                summary="Generated implementation",
+            )
+            stale = build_record_event(
+                root=root,
+                prev_event_hash=genesis["event_hash"],
+                event_type="test_result",
+                source_type="tool",
+                summary="Verified stale implementation",
+            )
+            append_event(bac_file, first)
+
+            with self.assertRaisesRegex(ValueError, "prev_event_hash does not match current BAC head"):
+                append_event(bac_file, stale)
+
+            self.assertEqual([event["event_id"] for event in read_events(bac_file)], [genesis["event_id"], first["event_id"]])
+
     def test_redaction_masks_secrets_and_records_metadata(self) -> None:
         redacted, metadata = redact_data({"command": "curl -H 'Authorization: sk-testsecret123456789012345'"})
 
@@ -477,6 +504,33 @@ class BacCoreTests(unittest.TestCase):
                     source_type="human",
                     summary="Misattributed AI output",
                 )
+
+    def test_builder_accepts_tool_verification_event(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bac_file = root / "project.bac"
+            genesis = build_genesis_event(root)
+            initialize_bac_file(bac_file, genesis)
+            verification = build_record_event(
+                root=root,
+                prev_event_hash=genesis["event_hash"],
+                event_type="verification",
+                source_type="tool",
+                summary="Verified BAC ledger",
+            )
+            append_event(bac_file, verification)
+            checkpoint = build_record_event(
+                root=root,
+                prev_event_hash=verification["event_hash"],
+                event_type="checkpoint",
+                source_type="system",
+                summary="Local checkpoint",
+            )
+            append_event(bac_file, checkpoint)
+
+            report = verify_bac_file(bac_file)
+
+            self.assertEqual(report.status, "pass")
 
     def test_builder_rejects_unimplemented_signed_trust_level(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -39,7 +39,7 @@ EVENT_SOURCE_POLICY = {
     "file_snapshot": "tool",
     "test_result": "tool",
     "checkpoint": "system",
-    "verification": "system",
+    "verification": {"system", "tool"},
 }
 ATTRIBUTION_REPAIR_HINT = (
     "To record human adoption of AI work, record the AI-created content as "
@@ -131,7 +131,14 @@ def validate_event_source_policy(event_type: Any, source_type: Any, prefix: str 
     if event_type not in EVENT_TYPES or source_type not in SOURCE_TYPES:
         return []
     required_source = EVENT_SOURCE_POLICY.get(event_type)
-    if required_source is None or source_type == required_source:
+    if required_source is None:
+        return []
+    if isinstance(required_source, set):
+        if source_type in required_source:
+            return []
+        allowed = " or ".join(sorted(required_source))
+        return [f"{prefix}{event_type} must use source_type {allowed}"]
+    if source_type == required_source:
         return []
     return [f"{prefix}{event_type} must use source_type {required_source}"]
 

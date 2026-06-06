@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+## [1.2.5] - 2026-06-06
+
+### Fixed（修复）
+
+- 加固 BAC 追加写入：`append_event` 现在会拒绝 `prev_event_hash` 不等于当前账本 head 的事件，避免并发、旧 head 或 git 回退合并场景生成分叉尾部。
+- 修正验证事件来源策略：`verification` 事件允许由 `tool` 或 `system` 记录，避免工具执行的验证证据被误判为来源矛盾。
+
 ## [1.2.4] - 2026-06-02
 
 ### Added（新增）

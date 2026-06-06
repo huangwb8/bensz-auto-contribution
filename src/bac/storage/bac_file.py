@@ -90,6 +90,16 @@ def append_event(path: Path, event: dict[str, Any], verify_existing: bool = True
         if report.errors:
             raise ValueError(f"cannot append to invalid BAC file: {'; '.join(report.errors)}")
     events = read_events(path)
+    if not events:
+        raise ValueError(f"BAC file contains no events: {path}")
+    current_hash = events[-1].get("event_hash")
+    if not isinstance(current_hash, str):
+        raise ValueError("current BAC head is missing event_hash")
+    if event.get("prev_event_hash") != current_hash:
+        raise ValueError(
+            "event prev_event_hash does not match current BAC head: "
+            f"expected {current_hash}, got {event.get('prev_event_hash')}"
+        )
     next_path = event_path(len(events) + 1)
     with ZipFile(path, "a", compression=ZIP_COMPRESSION) as archive:
         if next_path in archive.namelist():
