@@ -133,6 +133,18 @@ Verify integrity:
 bac verify
 ```
 
+Plan a narrow repair for a mechanically stale ledger tail. This is a dry run and does not write the `.bac` file:
+
+```bash
+bac repair stale-tail --json
+```
+
+Apply the repair only after reviewing the plan:
+
+```bash
+bac repair stale-tail --json --apply
+```
+
 Inspect the contribution timeline:
 
 ```bash
@@ -149,7 +161,7 @@ bac inspect --source-type human --since 2026-05-01 --until 2026-05-31 --json
 
 Date-only `--since`, `--until`, and `--on` values are interpreted as UTC calendar dates. `--until 2026-05-31` includes events through the end of that UTC date; pass an ISO-8601 timestamp for an exact boundary.
 
-All commands support `--root` for the target project root and `--bac-file` for a custom `.bac` path. `init`, `record`, `input`, `verify`, and `inspect` also support `--json` for machine-readable output.
+All commands support `--root` for the target project root and `--bac-file` for a custom `.bac` path. `init`, `record`, `input`, `verify`, `repair`, and `inspect` also support `--json` for machine-readable output.
 
 ### Private Anchor Workflow
 
@@ -259,6 +271,8 @@ It also checks attribution semantics for common source laundering attacks. For e
 For human input events, `bac verify` checks the `payload.input_provenance` and matching redacted evidence. If a ledger has AI activity but no human input provenance, verification returns a warning because human contributions may be underrecorded.
 
 Without an external anchor, a purely local hash chain cannot fully prevent tail truncation. BAC therefore supports local checkpoints and remote signed receipts. A valid receipt proves that a blinded ledger head existed at the service timestamp; it does not prove that every real-world action was recorded.
+
+`bac repair stale-tail` is an explicit, constrained maintenance command for historical ledgers that already contain a mechanical stale-head tail caused by an old head, concurrent append, or git rollback/merge. It only changes tail `prev_event_hash` values and derived `event_hash` values, refuses content or attribution changes, refuses signed/anchored/checkpointed tail events, defaults to dry-run, and appends a tool repair record plus a local checkpoint when applied.
 
 The verifier treats `.bac` files as untrusted input: it bounds container size, event count, and JSON member size before reading. The reference anchor server is open for local development, but production mode requires bearer tokens for anchor writes, admin access, and ledger receipt queries.
 

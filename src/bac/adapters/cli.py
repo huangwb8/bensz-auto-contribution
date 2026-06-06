@@ -35,6 +35,7 @@ from bac.service.event_builder import (
     default_actor,
 )
 from bac.service.evidence import parse_prompt_log_blocks
+from bac.service.repair import repair_stale_tail
 from bac.storage.bac_file import DEFAULT_BAC_FILE, append_event, current_head_hash, initialize_bac_file, read_events
 
 
@@ -100,6 +101,14 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--require-anchor", action="store_true", help="fail unless a valid remote anchor receipt exists")
     verify.add_argument("--json", action="store_true", help="print machine-readable output")
     verify.set_defaults(func=_cmd_verify)
+
+    repair = subparsers.add_parser("repair", help="plan or apply constrained BAC ledger repairs")
+    repair_subparsers = repair.add_subparsers(dest="repair_command", required=True)
+    stale_tail = repair_subparsers.add_parser("stale-tail", help="repair a uniquely provable stale tail")
+    stale_tail.add_argument("--apply", action="store_true", help="write the planned repair")
+    stale_tail.add_argument("--max-events", type=int, default=8, help="maximum tail events to repair")
+    stale_tail.add_argument("--json", action="store_true", help="print machine-readable output")
+    stale_tail.set_defaults(func=_cmd_repair_stale_tail)
 
     inspect = subparsers.add_parser("inspect", help="show a contribution timeline")
     inspect.add_argument("--limit", type=int)
@@ -399,6 +408,18 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         for error in report.errors:
             print(f"error: {error}")
     return 0 if report.status in {"pass", "warn"} else 1
+
+
+def _cmd_repair_stale_tail(args: argparse.Namespace) -> int:
+    root = Path(args.root).resolve()
+    result = repair_stale_tail(
+        root,
+        _bac_path(root, args.bac_file),
+        apply=args.apply,
+        max_events=args.max_events,
+    )
+    _print_output(result, args.json)
+    return 1 if result.get("status") == "refused" else 0
 
 
 def _cmd_inspect(args: argparse.Namespace) -> int:

@@ -8,6 +8,7 @@ import tempfile
 import unittest
 import warnings
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 from zipfile import ZipFile
 
@@ -19,6 +20,7 @@ from bac.core.hash_chain import attach_event_hash, compute_event_hash
 from bac.core.schema import FORMAT_VERSION
 from bac.core.verify import verify_bac_file
 from bac.report.inspect import timeline
+from bac.service.repair import repair_stale_tail
 from bac.service.event_builder import build_genesis_event, build_record_event
 from bac.service.redaction import redact_data
 from bac.storage.bac_file import append_event, initialize_bac_file, read_events
@@ -152,6 +154,89 @@ class BacCoreTests(unittest.TestCase):
                 append_event(bac_file, stale)
 
             self.assertEqual([event["event_id"] for event in read_events(bac_file)], [genesis["event_id"], first["event_id"]])
+
+    def test_repair_stale_tail_dry_run_plans_without_writing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bac_file = root / "project.bac"
+            _write_stale_tail_fixture(root, bac_file)
+            before = bac_file.read_bytes()
+
+            result = repair_stale_tail(root, bac_file, apply=False)
+
+            self.assertEqual(result["status"], "planned")
+            self.assertFalse(result["apply"])
+            self.assertEqual(len(result["affected_events"]), 1)
+            self.assertEqual(result["affected_events"][0]["sequence"], 3)
+            self.assertEqual(bac_file.read_bytes(), before)
+
+    def test_repair_stale_tail_apply_appends_repair_record_and_checkpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bac_file = root / "project.bac"
+            original_events = _write_stale_tail_fixture(root, bac_file)
+            stale_before = original_events[2]
+
+            result = repair_stale_tail(root, bac_file, apply=True)
+
+            self.assertEqual(result["status"], "repaired")
+            self.assertTrue(result["apply"])
+            self.assertIn("repair_event_id", result)
+            self.assertIn("checkpoint_event_id", result)
+            report = verify_bac_file(bac_file)
+            self.assertIn(report.status, {"pass", "warn"})
+            self.assertEqual(report.errors, [])
+            repaired_events = read_events(bac_file)
+            repaired_stale = repaired_events[2]
+            self.assertEqual(repaired_stale["event_id"], stale_before["event_id"])
+            self.assertEqual(repaired_stale["source_type"], stale_before["source_type"])
+            self.assertEqual(repaired_stale["actor"], stale_before["actor"])
+            self.assertEqual(repaired_stale["payload"], stale_before["payload"])
+            self.assertEqual(repaired_stale["evidence"], stale_before["evidence"])
+            self.assertNotEqual(repaired_stale["prev_event_hash"], stale_before["prev_event_hash"])
+            self.assertNotEqual(repaired_stale["event_hash"], stale_before["event_hash"])
+            self.assertEqual(repaired_events[-2]["event_id"], result["repair_event_id"])
+            self.assertEqual(repaired_events[-2]["event_type"], "tool_command")
+            self.assertEqual(repaired_events[-2]["source_type"], "tool")
+            self.assertEqual(repaired_events[-1]["event_id"], result["checkpoint_event_id"])
+            self.assertEqual(repaired_events[-1]["event_type"], "checkpoint")
+
+    def test_repair_stale_tail_refuses_content_tampering(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bac_file = root / "project.bac"
+            events = _write_stale_tail_fixture(root, bac_file)
+            events[2]["payload"]["summary"] = "Tampered after stale write"
+            _rewrite_bac_events(bac_file, events)
+            before = bac_file.read_bytes()
+
+            result = repair_stale_tail(root, bac_file, apply=True)
+
+            self.assertEqual(result["status"], "refused")
+            self.assertIn("event_hash mismatch", result["reason"])
+            self.assertEqual(bac_file.read_bytes(), before)
+
+    def test_cli_repair_stale_tail_dry_run_and_apply(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = _cli_env()
+            bac_file = root / "project.bac"
+            _write_stale_tail_fixture(root, bac_file)
+            before = bac_file.read_bytes()
+
+            dry_run = _run_bac(root, "repair", "stale-tail", "--json", env=env)
+
+            self.assertEqual(dry_run.returncode, 0, dry_run.stderr)
+            dry_output = json.loads(dry_run.stdout)
+            self.assertEqual(dry_output["status"], "planned")
+            self.assertEqual(bac_file.read_bytes(), before)
+
+            applied = _run_bac(root, "repair", "stale-tail", "--json", "--apply", env=env)
+
+            self.assertEqual(applied.returncode, 0, applied.stderr)
+            applied_output = json.loads(applied.stdout)
+            self.assertEqual(applied_output["status"], "repaired")
+            self.assertEqual(verify_bac_file(bac_file).errors, [])
 
     def test_redaction_masks_secrets_and_records_metadata(self) -> None:
         redacted, metadata = redact_data({"command": "curl -H 'Authorization: sk-testsecret123456789012345'"})
@@ -1058,6 +1143,41 @@ def _run_bac(root: Path, *args: str, env: dict[str, str]) -> subprocess.Complete
         text=True,
         env=env,
     )
+
+
+def _write_stale_tail_fixture(root: Path, bac_file: Path) -> list[dict[str, Any]]:
+    genesis = build_genesis_event(root)
+    initialize_bac_file(bac_file, genesis)
+    first = build_record_event(
+        root=root,
+        prev_event_hash=genesis["event_hash"],
+        event_type="ai_generation",
+        source_type="ai",
+        summary="Generated implementation",
+    )
+    stale = build_record_event(
+        root=root,
+        prev_event_hash=genesis["event_hash"],
+        event_type="test_result",
+        source_type="tool",
+        summary="Verified implementation from stale head",
+    )
+    append_event(bac_file, first)
+    events = [genesis, first, stale]
+    _rewrite_bac_events(bac_file, events)
+    report = verify_bac_file(bac_file)
+    assert report.status == "fail"
+    assert any("prev_event_hash does not match previous event_hash" in error for error in report.errors)
+    return events
+
+
+def _rewrite_bac_events(bac_file: Path, events: list[dict[str, Any]]) -> None:
+    with ZipFile(bac_file, "r") as archive:
+        manifest = archive.read(MANIFEST_PATH)
+    with ZipFile(bac_file, "w") as archive:
+        archive.writestr(MANIFEST_PATH, manifest)
+        for index, event in enumerate(events, start=1):
+            archive.writestr(event_path(index), canonical_json(event))
 
 
 if __name__ == "__main__":

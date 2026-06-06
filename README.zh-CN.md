@@ -133,6 +133,18 @@ bac record \
 bac verify
 ```
 
+为机械性 stale-tail 账本尾部分叉生成修复计划。该命令默认 dry-run，不写入 `.bac` 文件：
+
+```bash
+bac repair stale-tail --json
+```
+
+确认计划后再显式应用：
+
+```bash
+bac repair stale-tail --json --apply
+```
+
 查看贡献时间线：
 
 ```bash
@@ -149,7 +161,7 @@ bac inspect --source-type human --since 2026-05-01 --until 2026-05-31 --json
 
 日期形式的 `--since`、`--until` 和 `--on` 按 UTC 自然日解释。`--until 2026-05-31` 会包含该 UTC 日期结束前的事件；如需精确边界，可传 ISO-8601 时间戳。
 
-所有命令都支持 `--root` 指定目标项目根目录，支持 `--bac-file` 指定自定义 `.bac` 路径。`init`、`record`、`input`、`verify`、`inspect` 均支持 `--json` 输出，便于 AI tool 或其它自动化流程调用。
+所有命令都支持 `--root` 指定目标项目根目录，支持 `--bac-file` 指定自定义 `.bac` 路径。`init`、`record`、`input`、`verify`、`repair`、`inspect` 均支持 `--json` 输出，便于 AI tool 或其它自动化流程调用。
 
 ### 隐私保护锚定流程
 
@@ -259,6 +271,8 @@ BAC 是 **tamper-evident**，即篡改可发现；它不是 tamper-proof。
 对于人类输入事件，`bac verify` 会校验 `payload.input_provenance` 和配套的脱敏 evidence。若账本存在 AI 活动但没有任何人类输入 provenance，验证会给出 warning，提示人类贡献可能被漏记。
 
 如果没有外部 anchor，纯本地哈希链不能完全防止尾部截断。因此 BAC 支持本地 checkpoint 和远程签名 receipt。有效 receipt 只能证明某个盲化账本 head 在服务端时间戳时已经存在；它不证明现实中的所有操作都被记录。
+
+`bac repair stale-tail` 是显式、受限的维护命令，只用于修复历史账本中已经存在的机械性旧 head 尾部分叉，例如并发追加、基于旧 head 写入或 git 回退/合并造成的尾部断链。它只允许改写尾部 `prev_event_hash` 和由此必然变化的 `event_hash`，拒绝内容或归因字段变化，拒绝 signed、anchored 或 checkpointed 尾部事件；默认只 dry-run，实际应用后会追加 tool repair record 和本地 checkpoint。
 
 验证器会把 `.bac` 文件视为不可信输入，在读取前限制容器总大小、事件数量和单个 JSON 成员大小。reference anchor server 在本地开发中保持易用，但生产模式要求 bearer token 保护写入、管理页面和账本 receipt 查询。
 

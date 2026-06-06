@@ -32,6 +32,19 @@ genesis -> human_instruction -> ai_generation -> file_change -> test_result -> c
 
 这使 `.bac` 具备 tamper-evident 能力：它不能阻止别人编辑 ZIP 文件，但编辑、插入、删除、复制隐藏内部条目或重排历史事件后，验证器可以发现容器结构异常、hash 不匹配或链条断裂。
 
+## 受限尾部修复
+
+`bac repair stale-tail` 用于处理历史账本中已经存在的机械性尾部分叉，例如工具基于旧 head 写入事件、并发追加或 git 回退/合并导致最后几条事件的 `prev_event_hash` 接到了较早的 head。
+
+该命令不是通用历史重写工具。它默认 dry-run，只在能够按容器事件顺序唯一证明为尾部 stale-head 断链时生成计划。允许变更的字段只有：
+
+- `prev_event_hash`
+- `event_hash`
+
+其它字段，包括 `event_id`、`event_type`、`source_type`、`trust_level`、`actor`、`payload`、`evidence`、`redactions` 和 `signature`，都不能被 repair 修改。若事件内容被篡改、归因字段被改写、断链位于中间、尾部包含 signed/anchored/checkpointed 事件，或修复后仍无法通过验证，命令会拒绝执行。
+
+实际执行 `--apply` 后，BAC 会先重写修复后的 ZIP 容器，再追加一条 `tool_command/source_type=tool` 的 repair record，并追加本地 checkpoint，保留修复行为本身的审计线索。
+
 ## 快速流程
 
 先安装本地包：
@@ -114,6 +127,18 @@ bac record \
 
 ```bash
 bac verify
+```
+
+为机械性 stale-tail 尾部分叉生成修复计划。默认只输出计划，不写入文件：
+
+```bash
+bac repair stale-tail --json
+```
+
+确认计划后再显式应用：
+
+```bash
+bac repair stale-tail --json --apply
 ```
 
 查看时间线：
