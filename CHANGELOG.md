@@ -4,6 +4,24 @@
 
 ## [Unreleased]
 
+## [1.2.6] - 2026-06-06
+
+### Added（新增）
+
+- 新增 `bac repair stale-tail` 命令：默认 dry-run 输出可审计修复计划，`--apply` 仅在可唯一证明为机械性旧 head 尾部分叉时重接尾部 `prev_event_hash` 并重算派生 `event_hash`。
+- 新增 `src/bac/service/repair.py` 模块：实现受限尾部修复逻辑，包括分叉检测、计划生成、原地修复写入、repair record 追加和本地 checkpoint。
+- 修复应用后自动追加 `tool_command/source_type=tool` repair record 与本地 checkpoint，保留修复行为本身的审计证据。
+- 新增 `bac repair stale-tail` 相关 CLI 入口、`--max-events`、`--apply`、`--json` 参数。
+- 新增计划文档 `docs/plans/2026-06-06-stale-tail-repair-command.md`。
+
+### Changed（变更）
+
+- 更新中英文 README 与 `docs/bac-tutorial.md`：补充 `bac repair stale-tail` 用法说明和安全边界描述。
+
+### Fixed（修复）
+
+- 为历史上已存在的 stale-head 尾部分叉提供受限修复路径，同时拒绝内容篡改、归因字段变化、signed/anchored/checkpointed 尾部事件和非尾部断链，避免 repair 被用作贡献来源重写工具。
+
 ## [1.2.5] - 2026-06-06
 
 ### Fixed（修复）
