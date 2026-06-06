@@ -222,7 +222,7 @@ These records can support AI usage disclosure, internal review, compliance notes
 
 ## 📦 `.bac` Format
 
-The default file is `project.bac`. Externally, it is one file. Internally, it is a ZIP container with at least:
+The default file is `docs/contribution.bac`. If `docs/` does not exist, `bac init` creates it under the project root. Externally, it is one file. Internally, it is a ZIP container with at least:
 
 ```text
 manifest.json

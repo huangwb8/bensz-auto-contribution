@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+from hashlib import sha256
 from contextlib import contextmanager
 from copy import deepcopy
 from pathlib import Path
@@ -30,7 +31,7 @@ except ImportError:  # pragma: no cover - non-POSIX fallback keeps reads/writes 
     fcntl = None  # type: ignore[assignment]
 
 
-DEFAULT_BAC_FILE = "project.bac"
+DEFAULT_BAC_FILE = "docs/contribution.bac"
 
 
 def read_events(path: Path) -> list[dict[str, Any]]:
@@ -97,7 +98,7 @@ def locked_bac_file(path: Path) -> Iterator[None]:
     """Serialize writers for a BAC container in this process group."""
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path = path.with_name(f".{path.name}.lock")
+    lock_path = _lock_path_for_bac_file(path)
     fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
     try:
         if fcntl is not None:
@@ -107,6 +108,23 @@ def locked_bac_file(path: Path) -> Iterator[None]:
         if fcntl is not None:
             fcntl.flock(fd, fcntl.LOCK_UN)
         os.close(fd)
+
+
+def _lock_path_for_bac_file(path: Path) -> Path:
+    resolved = str(path.expanduser().resolve(strict=False))
+    digest = sha256(resolved.encode("utf-8")).hexdigest()
+    runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+    if runtime_dir:
+        lock_dir = Path(runtime_dir) / "bac" / "locks"
+    else:
+        user_id = str(os.getuid()) if hasattr(os, "getuid") else "nouid"
+        lock_dir = Path(tempfile.gettempdir()) / f"bac-{user_id}" / "locks"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        lock_dir.chmod(0o700)
+    except OSError:
+        pass
+    return lock_dir / f"{digest}.lock"
 
 
 def append_event(

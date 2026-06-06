@@ -23,7 +23,7 @@ from bac.report.inspect import timeline
 from bac.service.repair import repair_stale_tail
 from bac.service.event_builder import build_genesis_event, build_record_event
 from bac.service.redaction import redact_data
-from bac.storage.bac_file import append_event, initialize_bac_file, read_events
+from bac.storage.bac_file import DEFAULT_BAC_FILE, append_event, initialize_bac_file, locked_bac_file, read_events
 
 
 class BacCoreTests(unittest.TestCase):
@@ -318,7 +318,7 @@ class BacCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             env = _cli_env()
-            bac_file = root / "project.bac"
+            bac_file = root / DEFAULT_BAC_FILE
             _write_stale_tail_fixture(root, bac_file)
             before = bac_file.read_bytes()
 
@@ -340,8 +340,13 @@ class BacCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             env = _cli_env()
+            self.assertFalse((root / "docs").exists())
             init_result = _run_bac(root, "init", "--mode", "local", "--json", env=env)
             self.assertEqual(init_result.returncode, 0, init_result.stderr)
+            output = json.loads(init_result.stdout)
+            self.assertEqual(Path(output["bac_file"]), (root / DEFAULT_BAC_FILE).resolve())
+            self.assertTrue((root / "docs").is_dir())
+            self.assertTrue((root / DEFAULT_BAC_FILE).is_file())
 
             processes = [
                 subprocess.Popen(
@@ -371,14 +376,26 @@ class BacCoreTests(unittest.TestCase):
 
             for stdout, stderr, returncode in results:
                 self.assertEqual(returncode, 0, stderr or stdout)
-            report = verify_bac_file(root / "project.bac")
+            report = verify_bac_file(root / DEFAULT_BAC_FILE)
             self.assertEqual(report.errors, [])
-            with ZipFile(root / "project.bac") as archive:
+            with ZipFile(root / DEFAULT_BAC_FILE) as archive:
                 self.assertIsNone(archive.testzip())
-            events = read_events(root / "project.bac")
+            events = read_events(root / DEFAULT_BAC_FILE)
             self.assertEqual(len(events), 7)
             summaries = {event["payload"]["summary"] for event in events[1:]}
             self.assertEqual(summaries, {f"Concurrent record {index}" for index in range(6)})
+            self.assertFalse((root / ".contribution.bac.lock").exists())
+            self.assertFalse((root / "docs" / ".contribution.bac.lock").exists())
+
+    def test_lock_file_is_not_created_next_to_bac_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bac_file = root / "project.bac"
+
+            with locked_bac_file(bac_file):
+                self.assertTrue(root.is_dir())
+
+            self.assertFalse((root / ".project.bac.lock").exists())
 
     def test_redaction_masks_secrets_and_records_metadata(self) -> None:
         redacted, metadata = redact_data({"command": "curl -H 'Authorization: sk-testsecret123456789012345'"})
@@ -876,7 +893,7 @@ class BacCoreTests(unittest.TestCase):
             self.assertEqual(output["status"], "recorded")
             self.assertEqual(output["skipped"], 0)
 
-            events = read_events(root / "project.bac")
+            events = read_events(root / DEFAULT_BAC_FILE)
             self.assertEqual(len(events), 2)
             event = events[-1]
             self.assertEqual(event["source_type"], "human")
@@ -913,7 +930,7 @@ class BacCoreTests(unittest.TestCase):
             duplicate = json.loads(second.stdout)
             self.assertEqual(duplicate["status"], "skipped")
             self.assertEqual(duplicate["skipped"], 1)
-            self.assertEqual(len(read_events(root / "project.bac")), 2)
+            self.assertEqual(len(read_events(root / DEFAULT_BAC_FILE)), 2)
 
     def test_cli_imports_prompt_log_as_supplemental_human_input(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -943,7 +960,7 @@ class BacCoreTests(unittest.TestCase):
             self.assertEqual(output["status"], "imported")
             self.assertEqual(output["recorded"], 2)
             self.assertEqual(output["skipped"], 0)
-            events = read_events(root / "project.bac")
+            events = read_events(root / DEFAULT_BAC_FILE)
             self.assertEqual(len(events), 3)
             imported = events[1:]
             self.assertTrue(all(event["source_type"] == "human" for event in imported))
@@ -958,7 +975,7 @@ class BacCoreTests(unittest.TestCase):
             self.assertEqual(duplicate_output["status"], "skipped")
             self.assertEqual(duplicate_output["recorded"], 0)
             self.assertEqual(duplicate_output["skipped"], 2)
-            self.assertEqual(len(read_events(root / "project.bac")), 3)
+            self.assertEqual(len(read_events(root / DEFAULT_BAC_FILE)), 3)
 
     def test_inspect_human_includes_input_provenance_summary(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1099,6 +1116,10 @@ class BacCoreTests(unittest.TestCase):
                 env=env,
             )
             self.assertEqual(init_result.returncode, 0, init_result.stderr)
+            init_output = json.loads(init_result.stdout)
+            self.assertEqual(Path(init_output["bac_file"]), (root / DEFAULT_BAC_FILE).resolve())
+            self.assertTrue((root / "docs").is_dir())
+            self.assertTrue((root / DEFAULT_BAC_FILE).is_file())
 
             invalid_result = subprocess.run(
                 [
@@ -1123,7 +1144,7 @@ class BacCoreTests(unittest.TestCase):
             self.assertEqual(invalid_result.returncode, 2)
             self.assertIn("ai_generation must use source_type ai", invalid_result.stderr)
             self.assertIn("human_approval/source_type=human", invalid_result.stderr)
-            self.assertEqual(len(read_events(root / "project.bac")), 1)
+            self.assertEqual(len(read_events(root / DEFAULT_BAC_FILE)), 1)
 
             invalid_approval_result = subprocess.run(
                 [
@@ -1149,7 +1170,7 @@ class BacCoreTests(unittest.TestCase):
             )
             self.assertEqual(invalid_approval_result.returncode, 2)
             self.assertIn("payload.approves_event_hash must reference an earlier event_hash", invalid_approval_result.stderr)
-            self.assertEqual(len(read_events(root / "project.bac")), 1)
+            self.assertEqual(len(read_events(root / DEFAULT_BAC_FILE)), 1)
 
             record_result = subprocess.run(
                 [

@@ -222,7 +222,7 @@ BAC 是过程记录与辅助审计系统，不是最终贡献裁判。
 
 ## 📦 `.bac` 格式
 
-默认文件名为 `project.bac`。从外部看它是一个文件；内部是 ZIP 容器，至少包含：
+默认文件为 `docs/contribution.bac`。如果项目根目录下还没有 `docs/`，`bac init` 会自动创建。从外部看它是一个文件；内部是 ZIP 容器，至少包含：
 
 ```text
 manifest.json

@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-06-07
+
+### Fixed（修复）
+
+- 修正 BAC CLI 默认账本路径为 `docs/contribution.bac`；`bac init` 会在项目根目录自动创建缺失的 `docs/` 目录。
+
 ## [1.3.0] - 2026-06-07
 
 ### Fixed（修复）

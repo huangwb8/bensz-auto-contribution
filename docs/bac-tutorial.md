@@ -4,7 +4,7 @@
 
 ## 核心概念
 
-`.bac` 是一个单文件 ZIP 容器，默认文件名是 `project.bac`。用户通常只需要看到这一个文件；工具会在容器内部维护 manifest、事件序列和后续可扩展的证据文件。
+`.bac` 是一个单文件 ZIP 容器，默认文件是 `docs/contribution.bac`。如果项目根目录下还没有 `docs/`，`bac init` 会自动创建。用户通常只需要看到这一个文件；工具会在容器内部维护 manifest、事件序列和后续可扩展的证据文件。
 
 当前 v2 容器至少包含：
 
@@ -365,7 +365,7 @@ bac verify --require-anchor
 
 `--bac-file`
 
-账本容器文件路径。默认是 `project.bac`。如果传相对路径，会放在 `--root` 下；如果传绝对路径，则直接使用该路径。
+账本容器文件路径。默认是 `docs/contribution.bac`。如果传相对路径，会放在 `--root` 下；如果传绝对路径，则直接使用该路径。
 
 `init --force`
 
