@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
+from contextlib import contextmanager
+from copy import deepcopy
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 from zipfile import BadZipFile, ZipFile
 
 from bac.core import container
@@ -17,7 +20,13 @@ from bac.core.container import (
     event_path,
     event_sequence,
 )
+from bac.core.hash_chain import compute_event_hash
 from bac.core.verify import verify_bac_file
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - non-POSIX fallback keeps reads/writes functional.
+    fcntl = None  # type: ignore[assignment]
 
 
 DEFAULT_BAC_FILE = "project.bac"
@@ -82,7 +91,56 @@ def initialize_bac_file(path: Path, genesis_event: dict[str, Any], force: bool =
         archive.writestr(event_path(1), canonical_json(genesis_event))
 
 
-def append_event(path: Path, event: dict[str, Any], verify_existing: bool = True) -> None:
+@contextmanager
+def locked_bac_file(path: Path) -> Iterator[None]:
+    """Serialize writers for a BAC container in this process group."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.with_name(f".{path.name}.lock")
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        if fcntl is not None:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        if fcntl is not None:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+
+def append_event(
+    path: Path,
+    event: dict[str, Any],
+    verify_existing: bool = True,
+    *,
+    allow_stale_head_rebase: bool = False,
+    lock: bool = True,
+) -> None:
+    if lock:
+        with locked_bac_file(path):
+            _append_event_unlocked(
+                path,
+                event,
+                verify_existing=verify_existing,
+                allow_stale_head_rebase=allow_stale_head_rebase,
+            )
+        return
+
+    _append_event_unlocked(
+        path,
+        event,
+        verify_existing=verify_existing,
+        allow_stale_head_rebase=allow_stale_head_rebase,
+    )
+
+
+def _append_event_unlocked(
+    path: Path,
+    event: dict[str, Any],
+    *,
+    verify_existing: bool,
+    allow_stale_head_rebase: bool,
+) -> None:
     if not path.exists():
         raise FileNotFoundError(f"BAC file does not exist: {path}")
     if verify_existing:
@@ -96,6 +154,14 @@ def append_event(path: Path, event: dict[str, Any], verify_existing: bool = True
     if not isinstance(current_hash, str):
         raise ValueError("current BAC head is missing event_hash")
     if event.get("prev_event_hash") != current_hash:
+        if allow_stale_head_rebase and _can_rebase_stale_event(event):
+            _rebase_event_to_head(event, current_hash)
+        else:
+            raise ValueError(
+                "event prev_event_hash does not match current BAC head: "
+                f"expected {current_hash}, got {event.get('prev_event_hash')}"
+            )
+    if event.get("prev_event_hash") != current_hash:
         raise ValueError(
             "event prev_event_hash does not match current BAC head: "
             f"expected {current_hash}, got {event.get('prev_event_hash')}"
@@ -105,3 +171,25 @@ def append_event(path: Path, event: dict[str, Any], verify_existing: bool = True
         if next_path in archive.namelist():
             raise ValueError(f"BAC container already contains event entry: {next_path}")
         archive.writestr(next_path, canonical_json(event))
+
+
+def _can_rebase_stale_event(event: dict[str, Any]) -> bool:
+    if event.get("event_type") in {"genesis", "checkpoint"}:
+        return False
+    if event.get("trust_level") in {"signed", "anchored"}:
+        return False
+    if event.get("signature") is not None:
+        return False
+    payload = event.get("payload")
+    if isinstance(payload, dict) and isinstance(payload.get("anchor"), dict):
+        return False
+    return True
+
+
+def _rebase_event_to_head(event: dict[str, Any], current_hash: str) -> None:
+    before = deepcopy(event)
+    event["prev_event_hash"] = current_hash
+    event["event_hash"] = compute_event_hash(event)
+    for key in (set(before) | set(event)) - {"prev_event_hash", "event_hash"}:
+        if before.get(key) != event.get(key):
+            raise ValueError("stale event rebase changed fields beyond prev_event_hash and event_hash")

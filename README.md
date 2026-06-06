@@ -139,6 +139,8 @@ Plan a narrow repair for a mechanically stale ledger tail. This is a dry run and
 bac repair stale-tail --json
 ```
 
+Routine CLI writes are serialized with a ledger lock, so two concurrent `bac record` calls do not append from the same stale head. `repair stale-tail` is mainly for historical ledgers, external integrations, or abnormal merges that already left a broken tail.
+
 Apply the repair only after reviewing the plan:
 
 ```bash

@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+## [1.2.7] - 2026-06-07
+
+### Fixed（修复）
+
+- 加固日常并发写入：普通 `bac record`、`bac input record`、`bac input import-log` 和 `bac config set` 会在账本锁内完成读取当前 head、构造事件和追加写入，避免两个进程基于同一旧 head 竞争导致第二条记录丢失或生成 stale-tail。
+- `append_event` 新增同目录文件锁，并提供显式 `allow_stale_head_rebase` 选项；该选项只允许普通未签名、未锚定、非 checkpoint 事件自动重接到最新 head，且只改变 `prev_event_hash` 与派生 `event_hash`。
+
+### Changed（变更）
+
+- 更新中英文 README 与 `docs/bac-tutorial.md`：补充账本锁串行化写入说明，明确日常并发应优先依赖锁定写入路径，`repair stale-tail` 主要用于历史账本修复。
+
 ## [1.2.6] - 2026-06-06
 
 ### Added（新增）

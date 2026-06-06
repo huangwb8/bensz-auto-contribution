@@ -139,6 +139,8 @@ bac verify
 bac repair stale-tail --json
 ```
 
+日常 CLI 写入会通过账本锁串行化，避免两个 `bac record` 同时基于同一旧 head 写入。`repair stale-tail` 主要用于修复历史账本、外部集成或异常合并已经留下的尾部断链。
+
 确认计划后再显式应用：
 
 ```bash

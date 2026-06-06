@@ -36,7 +36,14 @@ from bac.service.event_builder import (
 )
 from bac.service.evidence import parse_prompt_log_blocks
 from bac.service.repair import repair_stale_tail
-from bac.storage.bac_file import DEFAULT_BAC_FILE, append_event, current_head_hash, initialize_bac_file, read_events
+from bac.storage.bac_file import (
+    DEFAULT_BAC_FILE,
+    append_event,
+    current_head_hash,
+    initialize_bac_file,
+    locked_bac_file,
+    read_events,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -222,41 +229,42 @@ def _cmd_init(args: argparse.Namespace) -> int:
 def _cmd_record(args: argparse.Namespace) -> int:
     root = Path(args.root).resolve()
     bac_path = _bac_path(root, args.bac_file)
-    events = read_events(bac_path)
-    if not events:
-        raise FileNotFoundError(f"BAC file is empty or missing: {bac_path}")
-    head_hash = events[-1].get("event_hash")
-    if not isinstance(head_hash, str):
-        raise ValueError("current BAC head is missing event_hash")
-    config = _bac_config(events)
-    if args.trust_level in {"signed", "anchored"}:
-        raise ValueError(
-            f"{args.trust_level} trust_level is reserved; use event signatures or bac anchor import/push"
-        )
-
     payload = _json_object(args.payload_json, "payload-json") if args.payload_json else {}
     evidence = _json_list(args.evidence_json, "evidence-json") if args.evidence_json else []
-    _validate_record_payload_against_ledger(args.event_type, payload, events)
-    actor = default_actor(
-        args.actor_name or args.source_type,
-        args.actor_kind or args.source_type,
-        args.session_id,
-    )
-    event = build_record_event(
-        root=root,
-        prev_event_hash=head_hash,
-        event_type=args.event_type,
-        source_type=args.source_type,
-        summary=args.summary,
-        trust_level=args.trust_level,
-        actor=actor,
-        files=args.path,
-        command=args.command_text,
-        exit_code=args.exit_code,
-        payload=payload,
-        evidence=evidence,
-    )
-    append_event(bac_path, event)
+    with locked_bac_file(bac_path):
+        events = read_events(bac_path)
+        if not events:
+            raise FileNotFoundError(f"BAC file is empty or missing: {bac_path}")
+        head_hash = events[-1].get("event_hash")
+        if not isinstance(head_hash, str):
+            raise ValueError("current BAC head is missing event_hash")
+        config = _bac_config(events)
+        if args.trust_level in {"signed", "anchored"}:
+            raise ValueError(
+                f"{args.trust_level} trust_level is reserved; use event signatures or bac anchor import/push"
+            )
+
+        _validate_record_payload_against_ledger(args.event_type, payload, events)
+        actor = default_actor(
+            args.actor_name or args.source_type,
+            args.actor_kind or args.source_type,
+            args.session_id,
+        )
+        event = build_record_event(
+            root=root,
+            prev_event_hash=head_hash,
+            event_type=args.event_type,
+            source_type=args.source_type,
+            summary=args.summary,
+            trust_level=args.trust_level,
+            actor=actor,
+            files=args.path,
+            command=args.command_text,
+            exit_code=args.exit_code,
+            payload=payload,
+            evidence=evidence,
+        )
+        append_event(bac_path, event, lock=False)
     output = {
         "status": "recorded",
         "event_id": event["event_id"],
@@ -278,38 +286,39 @@ def _cmd_record(args: argparse.Namespace) -> int:
 def _cmd_input_record(args: argparse.Namespace) -> int:
     root = Path(args.root).resolve()
     bac_path = _bac_path(root, args.bac_file)
-    events = read_events(bac_path)
-    if not events:
-        raise FileNotFoundError(f"BAC file is empty or missing: {bac_path}")
-    head_hash = events[-1].get("event_hash")
-    if not isinstance(head_hash, str):
-        raise ValueError("current BAC head is missing event_hash")
-
     text = _read_message_text(args.message_file)
-    draft = build_human_input_event(
-        root=root,
-        prev_event_hash=head_hash,
-        text=text,
-        channel=args.channel,
-        host=args.host,
-        session_id=args.session_id,
-        message_index=args.message_index,
-        classification=args.classification,
-    )
-    existing = _find_human_input_event(events, _human_input_idempotency_key(draft))
-    if existing:
-        output = {
-            "status": "skipped",
-            "recorded": 0,
-            "skipped": 1,
-            "event_id": existing.get("event_id"),
-            "event_type": existing.get("event_type"),
-            "head_hash": head_hash,
-        }
-        _print_output(output, args.json)
-        return 0
+    with locked_bac_file(bac_path):
+        events = read_events(bac_path)
+        if not events:
+            raise FileNotFoundError(f"BAC file is empty or missing: {bac_path}")
+        head_hash = events[-1].get("event_hash")
+        if not isinstance(head_hash, str):
+            raise ValueError("current BAC head is missing event_hash")
 
-    append_event(bac_path, draft)
+        draft = build_human_input_event(
+            root=root,
+            prev_event_hash=head_hash,
+            text=text,
+            channel=args.channel,
+            host=args.host,
+            session_id=args.session_id,
+            message_index=args.message_index,
+            classification=args.classification,
+        )
+        existing = _find_human_input_event(events, _human_input_idempotency_key(draft))
+        if existing:
+            output = {
+                "status": "skipped",
+                "recorded": 0,
+                "skipped": 1,
+                "event_id": existing.get("event_id"),
+                "event_type": existing.get("event_type"),
+                "head_hash": head_hash,
+            }
+            _print_output(output, args.json)
+            return 0
+
+        append_event(bac_path, draft, lock=False)
     output = {
         "status": "recorded",
         "recorded": 1,
@@ -328,12 +337,12 @@ def _cmd_input_record(args: argparse.Namespace) -> int:
 def _cmd_input_import_log(args: argparse.Namespace) -> int:
     root = Path(args.root).resolve()
     bac_path = _bac_path(root, args.bac_file)
-    events = read_events(bac_path)
-    if not events:
-        raise FileNotFoundError(f"BAC file is empty or missing: {bac_path}")
     source_path = _project_relative_path(root, args.source_file)
     absolute_source = root / source_path
     if not absolute_source.exists():
+        events = read_events(bac_path)
+        if not events:
+            raise FileNotFoundError(f"BAC file is empty or missing: {bac_path}")
         output = {
             "status": "skipped",
             "recorded": 0,
@@ -349,27 +358,31 @@ def _cmd_input_import_log(args: argparse.Namespace) -> int:
     recorded = 0
     skipped = 0
     imported_events: list[dict[str, Any]] = []
-    known_events = list(events)
-    for block in blocks:
-        head_hash = known_events[-1].get("event_hash")
-        if not isinstance(head_hash, str):
-            raise ValueError("current BAC head is missing event_hash")
-        event = build_human_input_event(
-            root=root,
-            prev_event_hash=head_hash,
-            text=block["text"],
-            channel="prompt_log",
-            source_path=source_path.as_posix(),
-            start_line=block["start_line"],
-            end_line=block["end_line"],
-        )
-        if _find_human_input_event(known_events, _human_input_idempotency_key(event)):
-            skipped += 1
-            continue
-        append_event(bac_path, event)
-        known_events.append(event)
-        imported_events.append(event)
-        recorded += 1
+    with locked_bac_file(bac_path):
+        events = read_events(bac_path)
+        if not events:
+            raise FileNotFoundError(f"BAC file is empty or missing: {bac_path}")
+        known_events = list(events)
+        for block in blocks:
+            head_hash = known_events[-1].get("event_hash")
+            if not isinstance(head_hash, str):
+                raise ValueError("current BAC head is missing event_hash")
+            event = build_human_input_event(
+                root=root,
+                prev_event_hash=head_hash,
+                text=block["text"],
+                channel="prompt_log",
+                source_path=source_path.as_posix(),
+                start_line=block["start_line"],
+                end_line=block["end_line"],
+            )
+            if _find_human_input_event(known_events, _human_input_idempotency_key(event)):
+                skipped += 1
+                continue
+            append_event(bac_path, event, lock=False)
+            known_events.append(event)
+            imported_events.append(event)
+            recorded += 1
 
     output: dict[str, Any] = {
         "status": "imported" if recorded else "skipped",
@@ -452,25 +465,26 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
 def _cmd_config_set(args: argparse.Namespace) -> int:
     root = Path(args.root).resolve()
     bac_path = _bac_path(root, args.bac_file)
-    events = read_events(bac_path)
-    if not events:
-        raise FileNotFoundError(f"BAC file is empty or missing: {bac_path}")
-    config = _bac_config(events)
-    if args.key == "mode":
-        if args.value not in {"local", "hybrid"}:
-            raise ValueError("mode must be local or hybrid")
-        config["mode"] = args.value
-    elif args.key == "anchor.require":
-        config["anchor.require"] = _parse_bool(args.value)
-    elif args.key == "anchor.url":
-        config["anchor.url"] = args.value
-    elif args.key == "anchor.ledger_id":
-        config["anchor.ledger_id"] = args.value
-    elif args.key == "cloud.auto_anchor":
-        config["cloud.auto_anchor"] = _parse_bool(args.value)
-    if not isinstance(config.get("anchor.ledger_nonce"), str):
-        config["anchor.ledger_nonce"] = token_hex(32)
-    event = _append_config_event(root, bac_path, events, config, f"Updated BAC config: {args.key}")
+    with locked_bac_file(bac_path):
+        events = read_events(bac_path)
+        if not events:
+            raise FileNotFoundError(f"BAC file is empty or missing: {bac_path}")
+        config = _bac_config(events)
+        if args.key == "mode":
+            if args.value not in {"local", "hybrid"}:
+                raise ValueError("mode must be local or hybrid")
+            config["mode"] = args.value
+        elif args.key == "anchor.require":
+            config["anchor.require"] = _parse_bool(args.value)
+        elif args.key == "anchor.url":
+            config["anchor.url"] = args.value
+        elif args.key == "anchor.ledger_id":
+            config["anchor.ledger_id"] = args.value
+        elif args.key == "cloud.auto_anchor":
+            config["cloud.auto_anchor"] = _parse_bool(args.value)
+        if not isinstance(config.get("anchor.ledger_nonce"), str):
+            config["anchor.ledger_nonce"] = token_hex(32)
+        event = _append_config_event(root, bac_path, events, config, f"Updated BAC config: {args.key}", lock=False)
     _print_output({"status": "configured", "key": args.key, "head_hash": event["event_hash"]}, args.json)
     return 0
 
@@ -768,6 +782,8 @@ def _append_config_event(
     events: list[dict[str, Any]],
     config: dict[str, Any],
     summary: str,
+    *,
+    lock: bool = True,
 ) -> dict[str, Any]:
     event = build_record_event(
         root=root,
@@ -779,7 +795,7 @@ def _append_config_event(
         actor=default_actor("bac", "system_tool"),
         payload={"bac_config": config},
     )
-    append_event(bac_path, event)
+    append_event(bac_path, event, lock=lock)
     return event
 
 

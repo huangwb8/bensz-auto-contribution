@@ -155,6 +155,63 @@ class BacCoreTests(unittest.TestCase):
 
             self.assertEqual([event["event_id"] for event in read_events(bac_file)], [genesis["event_id"], first["event_id"]])
 
+    def test_append_rebases_plain_stale_event_when_explicitly_allowed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bac_file = root / "project.bac"
+            genesis = build_genesis_event(root)
+            initialize_bac_file(bac_file, genesis)
+            first = build_record_event(
+                root=root,
+                prev_event_hash=genesis["event_hash"],
+                event_type="ai_generation",
+                source_type="ai",
+                summary="Generated implementation",
+            )
+            stale = build_record_event(
+                root=root,
+                prev_event_hash=genesis["event_hash"],
+                event_type="test_result",
+                source_type="tool",
+                summary="Verified stale implementation",
+            )
+            stale_payload = dict(stale["payload"])
+            append_event(bac_file, first)
+
+            append_event(bac_file, stale, allow_stale_head_rebase=True)
+
+            events = read_events(bac_file)
+            self.assertEqual(len(events), 3)
+            self.assertEqual(events[-1]["prev_event_hash"], first["event_hash"])
+            self.assertEqual(events[-1]["event_hash"], compute_event_hash(events[-1]))
+            self.assertEqual(events[-1]["payload"], stale_payload)
+            self.assertEqual(stale["prev_event_hash"], first["event_hash"])
+
+    def test_append_refuses_to_rebase_checkpoint_event(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bac_file = root / "project.bac"
+            genesis = build_genesis_event(root)
+            initialize_bac_file(bac_file, genesis)
+            first = build_record_event(
+                root=root,
+                prev_event_hash=genesis["event_hash"],
+                event_type="ai_generation",
+                source_type="ai",
+                summary="Generated implementation",
+            )
+            stale_checkpoint = build_record_event(
+                root=root,
+                prev_event_hash=genesis["event_hash"],
+                event_type="checkpoint",
+                source_type="system",
+                summary="Checkpoint from stale head",
+            )
+            append_event(bac_file, first)
+
+            with self.assertRaisesRegex(ValueError, "prev_event_hash does not match current BAC head"):
+                append_event(bac_file, stale_checkpoint, allow_stale_head_rebase=True)
+
     def test_repair_stale_tail_dry_run_plans_without_writing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -237,6 +294,48 @@ class BacCoreTests(unittest.TestCase):
             applied_output = json.loads(applied.stdout)
             self.assertEqual(applied_output["status"], "repaired")
             self.assertEqual(verify_bac_file(bac_file).errors, [])
+
+    def test_cli_serializes_concurrent_record_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = _cli_env()
+            init_result = _run_bac(root, "init", "--mode", "local", "--json", env=env)
+            self.assertEqual(init_result.returncode, 0, init_result.stderr)
+
+            processes = [
+                subprocess.Popen(
+                    [
+                        sys.executable,
+                        "-m",
+                        "bac",
+                        "--root",
+                        str(root),
+                        "record",
+                        "--event-type",
+                        "test_result",
+                        "--source-type",
+                        "tool",
+                        "--summary",
+                        f"Concurrent record {index}",
+                        "--json",
+                    ],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    env=env,
+                )
+                for index in range(6)
+            ]
+            results = [process.communicate(timeout=20) + (process.returncode,) for process in processes]
+
+            for stdout, stderr, returncode in results:
+                self.assertEqual(returncode, 0, stderr or stdout)
+            report = verify_bac_file(root / "project.bac")
+            self.assertEqual(report.errors, [])
+            events = read_events(root / "project.bac")
+            self.assertEqual(len(events), 7)
+            summaries = {event["payload"]["summary"] for event in events[1:]}
+            self.assertEqual(summaries, {f"Concurrent record {index}" for index in range(6)})
 
     def test_redaction_masks_secrets_and_records_metadata(self) -> None:
         redacted, metadata = redact_data({"command": "curl -H 'Authorization: sk-testsecret123456789012345'"})
