@@ -10,7 +10,7 @@ cd /docker/bensz-auto-contribution; docker-compose pull; docker-compose down; do
 
 ```
 github项目：huangwb8/bensz-auto-contribution
-version=1.2.7
+version=1.3.0
 git-commit skill保存变更; 最后一个commit要新增 tag 为 v{version}，并且该commit信息要提到更新版本,并且体现的是这个版本与上一个版本之间的所有变化； git-publish-release skill 发布为一个release到github仓库。基于本地pypi配置（不经过github action）发布到pypi上。将最新的版本安装到本设备。另外，bac系统的服务端的docker镜像也要更新到dockerhub里。
 ```
 

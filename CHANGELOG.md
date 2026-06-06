@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-06-07
+
+### Fixed（修复）
+
+- 加固 BAC v2 容器写入：追加事件不再使用 ZIP append 原地修改，而是在账本锁内重建同目录临时容器、校验通过后原子替换，降低多 agent 并发、进程中断或写入失败导致 ZIP central directory 尾部损坏的风险。
+- `repair stale-tail` 复用统一的原子容器重写路径，避免 repair 写入与日常 append 写入的可靠性策略漂移。
+
 ## [1.2.7] - 2026-06-07
 
 ### Fixed（修复）

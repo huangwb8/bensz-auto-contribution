@@ -2,19 +2,14 @@
 
 from __future__ import annotations
 
-import os
-import tempfile
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
-from zipfile import ZipFile
 
-from bac.core.canonicalize import canonical_json
-from bac.core.container import MANIFEST_PATH, ZIP_COMPRESSION, event_path, event_sequence
 from bac.core.hash_chain import compute_event_hash, is_sha256
 from bac.core.verify import verify_bac_file, verify_events
 from bac.service.event_builder import build_record_event, default_actor
-from bac.storage.bac_file import append_event, read_events
+from bac.storage.bac_file import append_event, read_events, rewrite_events_atomic
 
 
 REPAIR_TYPE = "stale-tail"
@@ -223,27 +218,7 @@ def _only_allowed_fields_changed(before: dict[str, Any], after: dict[str, Any]) 
 
 
 def _atomic_rewrite_events(path: Path, events: list[dict[str, Any]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, raw_tmp = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
-    os.close(fd)
-    tmp_path = Path(raw_tmp)
-    try:
-        with ZipFile(path, "r") as source, ZipFile(tmp_path, "w", compression=ZIP_COMPRESSION) as target:
-            names = source.namelist()
-            if MANIFEST_PATH not in names:
-                raise ValueError(f"container missing {MANIFEST_PATH}")
-            for name in names:
-                if name == MANIFEST_PATH or event_sequence(name) is None:
-                    target.writestr(name, source.read(name))
-            for index, event in enumerate(events, start=1):
-                target.writestr(event_path(index), canonical_json(event))
-        tmp_report = verify_bac_file(tmp_path)
-        if tmp_report.errors:
-            raise ValueError("; ".join(tmp_report.errors))
-        os.replace(tmp_path, path)
-    finally:
-        if tmp_path.exists():
-            tmp_path.unlink()
+    rewrite_events_atomic(path, events)
 
 
 def _append_repair_record(root: Path, bac_path: Path, affected_events: list[dict[str, Any]]) -> dict[str, Any]:

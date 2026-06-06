@@ -212,6 +212,47 @@ class BacCoreTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "prev_event_hash does not match current BAC head"):
                 append_event(bac_file, stale_checkpoint, allow_stale_head_rebase=True)
 
+    def test_append_failure_does_not_mutate_existing_container(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bac_file = root / "project.bac"
+            genesis = build_genesis_event(root)
+            initialize_bac_file(bac_file, genesis)
+            before = bac_file.read_bytes()
+            record = build_record_event(
+                root=root,
+                prev_event_hash=genesis["event_hash"],
+                event_type="test_result",
+                source_type="tool",
+                summary="Record with simulated replace failure",
+            )
+
+            with patch("bac.storage.bac_file.os.replace", side_effect=OSError("simulated replace failure")):
+                with self.assertRaisesRegex(OSError, "simulated replace failure"):
+                    append_event(bac_file, record)
+
+            self.assertEqual(bac_file.read_bytes(), before)
+            self.assertEqual([event["event_id"] for event in read_events(bac_file)], [genesis["event_id"]])
+
+    def test_append_preserves_existing_file_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bac_file = root / "project.bac"
+            genesis = build_genesis_event(root)
+            initialize_bac_file(bac_file, genesis)
+            bac_file.chmod(0o640)
+            record = build_record_event(
+                root=root,
+                prev_event_hash=genesis["event_hash"],
+                event_type="test_result",
+                source_type="tool",
+                summary="Record without changing ledger mode",
+            )
+
+            append_event(bac_file, record)
+
+            self.assertEqual(bac_file.stat().st_mode & 0o777, 0o640)
+
     def test_repair_stale_tail_dry_run_plans_without_writing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -332,6 +373,8 @@ class BacCoreTests(unittest.TestCase):
                 self.assertEqual(returncode, 0, stderr or stdout)
             report = verify_bac_file(root / "project.bac")
             self.assertEqual(report.errors, [])
+            with ZipFile(root / "project.bac") as archive:
+                self.assertIsNone(archive.testzip())
             events = read_events(root / "project.bac")
             self.assertEqual(len(events), 7)
             summaries = {event["payload"]["summary"] for event in events[1:]}

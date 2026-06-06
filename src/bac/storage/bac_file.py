@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from contextlib import contextmanager
 from copy import deepcopy
 from pathlib import Path
@@ -166,11 +167,48 @@ def _append_event_unlocked(
             "event prev_event_hash does not match current BAC head: "
             f"expected {current_hash}, got {event.get('prev_event_hash')}"
         )
-    next_path = event_path(len(events) + 1)
-    with ZipFile(path, "a", compression=ZIP_COMPRESSION) as archive:
-        if next_path in archive.namelist():
-            raise ValueError(f"BAC container already contains event entry: {next_path}")
-        archive.writestr(next_path, canonical_json(event))
+    rewrite_events_atomic(path, [*events, event])
+
+
+def rewrite_events_atomic(path: Path, events: list[dict[str, Any]]) -> None:
+    """Rewrite event members via a verified same-directory replacement.
+
+    ZIP append mode mutates the original file in place, including the central
+    directory tail. A process interruption at that point can leave a readable
+    container whose final member has invalid compressed data. Rebuilding into a
+    sibling temp file and replacing only after container-integrity validation
+    keeps the previous ledger intact on write failure.
+    """
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, raw_tmp = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    os.close(fd)
+    tmp_path = Path(raw_tmp)
+    try:
+        with ZipFile(path, "r") as source, ZipFile(tmp_path, "w", compression=ZIP_COMPRESSION) as target:
+            names = source.namelist()
+            if MANIFEST_PATH not in names:
+                raise ValueError(f"container missing {MANIFEST_PATH}")
+            for name in names:
+                if event_sequence(name) is None:
+                    info = source.getinfo(name)
+                    if info.file_size > container.MAX_MEMBER_UNCOMPRESSED_BYTES:
+                        raise ValueError(
+                            f"{name}: uncompressed size exceeds limit of "
+                            f"{container.MAX_MEMBER_UNCOMPRESSED_BYTES} bytes"
+                        )
+                    target.writestr(name, source.read(name))
+            for index, item in enumerate(events, start=1):
+                target.writestr(event_path(index), canonical_json(item))
+
+        _copymode(path, tmp_path)
+        _fsync_file(tmp_path)
+        _validate_rewritten_container(tmp_path, expected_events=len(events))
+        os.replace(tmp_path, path)
+        _fsync_parent(path)
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink()
 
 
 def _can_rebase_stale_event(event: dict[str, Any]) -> bool:
@@ -193,3 +231,45 @@ def _rebase_event_to_head(event: dict[str, Any], current_hash: str) -> None:
     for key in (set(before) | set(event)) - {"prev_event_hash", "event_hash"}:
         if before.get(key) != event.get(key):
             raise ValueError("stale event rebase changed fields beyond prev_event_hash and event_hash")
+
+
+def _validate_rewritten_container(path: Path, *, expected_events: int) -> None:
+    try:
+        with ZipFile(path, "r") as archive:
+            bad_member = archive.testzip()
+    except BadZipFile as exc:
+        raise ValueError(f"rewritten BAC file is not a valid ZIP container: {path}") from exc
+    if bad_member is not None:
+        raise ValueError(f"rewritten BAC container has invalid member data: {bad_member}")
+    events = read_events(path)
+    if len(events) != expected_events:
+        raise ValueError(f"rewritten BAC container has {len(events)} events, expected {expected_events}")
+
+
+def _fsync_file(path: Path) -> None:
+    try:
+        with path.open("rb") as handle:
+            os.fsync(handle.fileno())
+    except OSError:
+        return
+
+
+def _copymode(source: Path, target: Path) -> None:
+    try:
+        target.chmod(source.stat().st_mode & 0o777)
+    except OSError:
+        return
+
+
+def _fsync_parent(path: Path) -> None:
+    if not hasattr(os, "O_DIRECTORY"):
+        return
+    fd: int | None = None
+    try:
+        fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        os.fsync(fd)
+    except OSError:
+        return
+    finally:
+        if fd is not None:
+            os.close(fd)
