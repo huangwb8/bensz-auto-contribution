@@ -139,7 +139,7 @@ bac verify
 bac repair stale-tail --json
 ```
 
-日常 CLI 写入会通过账本锁串行化，避免两个 `bac record` 同时基于同一旧 head 写入。每次追加都会在同目录重建临时 ZIP 容器，校验通过后再原子替换账本，而不是原地修改 ZIP 尾部。`repair stale-tail` 主要用于修复历史账本、外部集成或异常合并已经留下的尾部断链。
+日常 CLI 写入会通过项目目录外的单账本 OS 锁串行化，避免两个 `bac record` 同时基于同一旧 head 写入。每次追加都会在同目录重建临时 ZIP 容器，校验通过后再原子替换账本，而不是原地修改 ZIP 尾部。`repair stale-tail` 主要用于修复历史账本、外部集成或异常合并已经留下的尾部断链。
 
 确认计划后再显式应用：
 
@@ -274,7 +274,7 @@ BAC 是 **tamper-evident**，即篡改可发现；它不是 tamper-proof。
 
 如果没有外部 anchor，纯本地哈希链不能完全防止尾部截断。因此 BAC 支持本地 checkpoint 和远程签名 receipt。有效 receipt 只能证明某个盲化账本 head 在服务端时间戳时已经存在；它不证明现实中的所有操作都被记录。
 
-日常写入使用锁文件队列和原子容器替换：写入者会等待账本锁，在临界区内读取最新 head，在目标账本旁边写出并校验临时 ZIP，只有新容器验证通过后才替换旧账本。这样可以让多 agent 的普通写入保持串行，并避免追加失败时半写入原 ZIP central directory。
+日常写入使用单账本 OS 锁和原子容器替换：写入者会等待账本锁，在临界区内读取最新 head，在目标账本旁边写出并校验临时 ZIP，只有新容器验证通过后才替换旧账本。锁由解析后的 `.bac` 路径派生，并保存在项目目录外，因此普通写入不会在账本旁边留下 `.bac.lock` sidecar 文件。如果旧版本 BAC 已经留下项目内 sidecar lock，确认没有 BAC 命令运行后可以删除。这样可以让多 agent 的普通写入保持串行，并避免追加失败时半写入原 ZIP central directory。
 
 `bac repair stale-tail` 是显式、受限的维护命令，只用于修复历史账本中已经存在的机械性旧 head 尾部分叉，例如并发追加、基于旧 head 写入或 git 回退/合并造成的尾部断链。它只允许改写尾部 `prev_event_hash` 和由此必然变化的 `event_hash`，拒绝内容或归因字段变化，拒绝 signed、anchored 或 checkpointed 尾部事件；默认只 dry-run，实际应用后会追加 tool repair record 和本地 checkpoint。
 

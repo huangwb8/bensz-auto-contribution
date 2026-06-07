@@ -36,7 +36,7 @@ genesis -> human_instruction -> ai_generation -> file_change -> test_result -> c
 
 `bac repair stale-tail` 用于处理历史账本中已经存在的机械性尾部分叉，例如工具基于旧 head 写入事件、并发追加或 git 回退/合并导致最后几条事件的 `prev_event_hash` 接到了较早的 head。
 
-普通 CLI 写入已经通过账本锁串行化：`bac record`、`bac input record`、`bac input import-log` 和 `bac config set` 会在同一临界区内读取最新 head、构造事件并追加写入。追加时不会原地修改 ZIP 尾部，而是先在同目录写出临时 ZIP 容器，验证通过后再原子替换原账本。因此日常并发写入应优先依赖锁定写入路径；只有账本已经出现坏尾部时，才使用 repair。
+普通 CLI 写入已经通过项目目录外的单账本 OS 锁串行化：`bac record`、`bac input record`、`bac input import-log` 和 `bac config set` 会在同一临界区内读取最新 head、构造事件并追加写入。锁由解析后的 `.bac` 路径派生，因此不会在账本旁边留下 `.bac.lock` sidecar 文件；旧版本已经留下的项目内 sidecar lock，可在确认没有 BAC 命令运行后删除。追加时不会原地修改 ZIP 尾部，而是先在同目录写出临时 ZIP 容器，验证通过后再原子替换原账本。因此日常并发写入应优先依赖锁定写入路径；只有账本已经出现坏尾部时，才使用 repair。
 
 该命令不是通用历史重写工具。它默认 dry-run，只在能够按容器事件顺序唯一证明为尾部 stale-head 断链时生成计划。允许变更的字段只有：
 

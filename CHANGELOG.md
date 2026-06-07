@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+## [1.3.2] - 2026-06-07
+
+### Fixed（修复）
+
+- 将 BAC 写入锁迁移到项目目录外的单账本 OS 锁，避免 `bac record` 等日常写入在 `.bac` 旁边留下 `.bac.lock` sidecar 文件，同时保留并发写入串行化保护。
+- 更新中英文 README 与 `docs/bac-tutorial.md`：补充单账本 OS 锁说明，明确旧版本遗留的 sidecar lock 可在确认无 BAC 命令运行后删除。
+
 ## [1.3.1] - 2026-06-07
 
 ### Fixed（修复）

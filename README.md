@@ -139,7 +139,7 @@ Plan a narrow repair for a mechanically stale ledger tail. This is a dry run and
 bac repair stale-tail --json
 ```
 
-Routine CLI writes are serialized with a ledger lock, so two concurrent `bac record` calls do not append from the same stale head. Each append rebuilds a same-directory temporary ZIP container, verifies it, and atomically replaces the ledger instead of mutating the ZIP tail in place. `repair stale-tail` is mainly for historical ledgers, external integrations, or abnormal merges that already left a broken tail.
+Routine CLI writes are serialized with a per-ledger OS lock stored outside the project directory, so two concurrent `bac record` calls do not append from the same stale head. Each append rebuilds a same-directory temporary ZIP container, verifies it, and atomically replaces the ledger instead of mutating the ZIP tail in place. `repair stale-tail` is mainly for historical ledgers, external integrations, or abnormal merges that already left a broken tail.
 
 Apply the repair only after reviewing the plan:
 
@@ -274,7 +274,7 @@ For human input events, `bac verify` checks the `payload.input_provenance` and m
 
 Without an external anchor, a purely local hash chain cannot fully prevent tail truncation. BAC therefore supports local checkpoints and remote signed receipts. A valid receipt proves that a blinded ledger head existed at the service timestamp; it does not prove that every real-world action was recorded.
 
-Routine writes use a lock-file queue and atomic container replacement: writers wait for the ledger lock, read the latest head inside the critical section, write a verified temporary ZIP next to the target ledger, and replace the old ledger only after the new container verifies. This keeps normal multi-agent writes serialized and prevents a failed append from partially mutating the existing ZIP central directory.
+Routine writes use a per-ledger OS lock and atomic container replacement: writers wait for the ledger lock, read the latest head inside the critical section, write a verified temporary ZIP next to the target ledger, and replace the old ledger only after the new container verifies. The lock is keyed by the resolved `.bac` path and kept outside the project directory, so normal writes do not leave `.bac.lock` sidecar files next to the ledger. If an older BAC version already left a project-side lock file, it can be deleted after confirming no BAC command is running. This keeps normal multi-agent writes serialized and prevents a failed append from partially mutating the existing ZIP central directory.
 
 `bac repair stale-tail` is an explicit, constrained maintenance command for historical ledgers that already contain a mechanical stale-head tail caused by an old head, concurrent append, or git rollback/merge. It only changes tail `prev_event_hash` values and derived `event_hash` values, refuses content or attribution changes, refuses signed/anchored/checkpointed tail events, defaults to dry-run, and appends a tool repair record plus a local checkpoint when applied.
 
