@@ -26,6 +26,7 @@ BAC does not claim that a file can never be modified. Instead, it makes changes 
 ### Key Features
 
 - 🧑‍💻 **Human-AI Attribution**: Explicitly separates `human`, `ai`, `tool`, and `system` sources.
+- 🎙️ **Non-Text Input Provenance**: Preserves clearer human authorship signals for voice, dictation, and other AI interfaces through input channels, redacted evidence, and hashes.
 - 🧾 **Append-Only Event Model**: Records contribution history as ordered events instead of overwriting prior state.
 - 🔗 **Hash-Chain Verification**: Detects modified, inserted, deleted, duplicated, or reordered events.
 - 📦 **Single-File `.bac` Container**: Stores a ZIP-based v2 ledger with `manifest.json` and canonical JSON event files.
@@ -213,6 +214,8 @@ BAC is a process record and audit aid, not a final judge of contribution ownersh
 In AI-assisted research, writing, and software projects, BAC can record human requirements, constraints, reviews, hand-written edits, final approvals, AI drafts, refactoring proposals, generated code, command outputs, tests, citation checks, build logs, file snapshots, and diff summaries.
 
 For AI coding sessions, the most reliable human-input source is the user message submitted to the AI tool host. `bac input record` writes a `source_type=human` event with a summary, redacted excerpt, provenance channel, optional host/session/index, and a domain-separated message hash. It does not store the full prompt by default. A message hash is useful audit evidence, but it is not a zero-leakage privacy guarantee for short or guessable prompts.
+
+As AI interfaces move beyond typed chat into voice, dictation, screen-mediated input, or other non-text workflows, BAC's event model becomes especially useful for preserving human author contribution. Host-provided transcripts, input-channel metadata, or other low-sensitivity artifacts can be represented as provenance and evidence for `source_type=human` events, while downstream AI-generated content remains recorded separately as AI work.
 
 If a user pastes logs, web text, generated code, or other third-party material into a prompt, BAC records that the human submitted that context. It does not automatically claim that every pasted fragment was authored by the human.
 
