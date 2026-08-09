@@ -1,20 +1,16 @@
 services:
-  # ── BAC Anchor 核心服务 ──────────────────────────────────────
   bac-anchor-app:
-    image: "huangwb8/bensz-auto-contribution:${BAC_ANCHOR_RELEASE_VERSION:?set BAC_ANCHOR_RELEASE_VERSION to a published release version, for example 1.2.2}"
-    # build:
-    #   context: ../..
-    #   dockerfile: server/Dockerfile
+    image: "huangwb8/bensz-auto-contribution:${BAC_ANCHOR_RELEASE_VERSION:?set BAC_ANCHOR_RELEASE_VERSION}@${BAC_ANCHOR_IMAGE_DIGEST:?set BAC_ANCHOR_IMAGE_DIGEST}"
     container_name: bac-anchor-app
+    ports:
+      - "127.0.0.1:${BAC_ANCHOR_LOOPBACK_PORT:-18080}:8080"
     expose:
       - "8080"
-    env_file:
-      - .env
     environment:
-      BAC_ANCHOR_ENV: ${BAC_ANCHOR_ENV:-production}
+      BAC_ANCHOR_ENV: production
       BAC_ANCHOR_DB_URL: postgresql://${POSTGRES_USER:-bac_anchor}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@bac-anchor-postgres:5432/${POSTGRES_DB:-bac_anchor}
       BAC_ANCHOR_REDIS_URL: redis://bac-anchor-redis:6379/${REDIS_DB:-0}
-      BAC_ANCHOR_PRIVATE_KEY_B64: ${BAC_ANCHOR_PRIVATE_KEY_B64:?set BAC_ANCHOR_PRIVATE_KEY_B64}
+      BAC_ANCHOR_PRIVATE_KEY_PATH: /run/secrets/bac_anchor_private_key
       BAC_ANCHOR_KEY_ID: ${BAC_ANCHOR_KEY_ID:-}
       BAC_ANCHOR_API_TOKEN: ${BAC_ANCHOR_API_TOKEN:?set BAC_ANCHOR_API_TOKEN}
       BAC_ANCHOR_ADMIN_TOKEN: ${BAC_ANCHOR_ADMIN_TOKEN:?set BAC_ANCHOR_ADMIN_TOKEN}
@@ -22,6 +18,8 @@ services:
       BAC_ANCHOR_MAX_BODY_BYTES: ${BAC_ANCHOR_MAX_BODY_BYTES:-8192}
       BAC_ANCHOR_RATE_LIMIT_PER_MINUTE: ${BAC_ANCHOR_RATE_LIMIT_PER_MINUTE:-120}
       TZ: ${TZ:-Asia/Shanghai}
+    secrets:
+      - bac_anchor_private_key
     depends_on:
       bac-anchor-postgres:
         condition: service_healthy
@@ -34,6 +32,9 @@ services:
       retries: 3
       start_period: 30s
     restart: unless-stopped
+    networks:
+      - proxy
+      - backend
     logging:
       driver: json-file
       options:
@@ -43,8 +44,11 @@ services:
   bac-anchor-postgres:
     image: postgres:17-alpine
     container_name: bac-anchor-postgres
-    env_file:
-      - .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-bac_anchor}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-bac_anchor}
+      PGDATA: ${PGDATA:-/var/lib/postgresql/data}
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
     healthcheck:
@@ -53,6 +57,8 @@ services:
       timeout: 5s
       retries: 12
     restart: unless-stopped
+    networks:
+      - backend
     logging:
       driver: json-file
       options:
@@ -71,13 +77,22 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    networks:
+      - backend
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "5"
 
+secrets:
+  bac_anchor_private_key:
+    file: ./secrets/anchor-private-key.b64
+
 networks:
-  default:
+  proxy:
     name: npm_default
     external: true
+  backend:
+    name: bac-anchor-backend
+    internal: true

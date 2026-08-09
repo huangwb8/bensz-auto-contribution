@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+### Changed（变更）
+
+- 加固 BAC Anchor Compose 部署：固定已核验镜像摘要，签名私钥改为只读 Compose secret，按服务最小注入环境变量，并将 PostgreSQL/Redis 隔离到 internal 后端网络。
+- 服务端仅新增回环端口供 SSH 隧道联动验收；生产公网接入仍要求单独配置域名、反向代理与 TLS。
+
 ## [1.3.2] - 2026-06-07
 
 ### Fixed（修复）

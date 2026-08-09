@@ -88,3 +88,5 @@ dmypy.json
 # 示例：
 # local-config.yml
 # *.backup
+.bensz-api/
+docs/deploy/20*/

@@ -28,6 +28,20 @@ git-commit skill保存变更; 最后一个commit要新增 tag 为 v{version}，�
 
 # 日常
 
+---
+
+请你：
+
+- 使用`ssh rn3`访问服务器，然后进入 `/docker/bensz-auto-contribution`（没有这个文件夹就创建），在这里布署docker-compose.yml、.env 或者其它必要的配置文件
+- 在 ./tmp 的某个子文件夹里进行测试，保证服务端和本地端可以协调地联动
+- 如果发现源代码有缺陷，可以修复
+
+目标：保证bac的服务端和本地端可以协调地联动，功能正常。然后：
+
+- 把服务器里实际可用的配置备份在 `docs/deploy/<yyyy-mm-dd>/` 这个文件夹里，包括 docker-compose.yml、.env 或者其它必要的配置文件
+
+---
+
 基于 docs/plans/2026-06-06-stale-tail-repair-command.md  优化源代码。 使用 awesome-code skill 辅助规划、优化。 不要破坏其它已经存在的功能。要保证最终成品能正常、稳定、高效地工作，让成品趋于完美。
 
 ---
