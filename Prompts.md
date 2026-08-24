@@ -30,6 +30,10 @@ git-commit skill保存变更; 最后一个commit要新增 tag 为 v{version}，�
 
 ---
 
+我准备依托这个项目写一个论文。 假设你要来写这个论文，你需要进行一些背景调研才能写introduction、discussion和立项。 要总结目前研究的不足之处，其中的痛点是本项目的目标。 你要用 [$research-literature-review](/Volumes/2T01/Cache/.codex/skills/research-literature-review/SKILL.md) 等先写综述，可以保存在 docs/reviews 里。 这是一个专家的意见，你可以参考： 我认为 **bensz-auto-contribution（BAC）真正值得研究的地方，不是“检测多少内容由 AI 生成”，而是试图解决一个随着 Agent 普及会越来越重要的问题：当人类与 AI 共同完成代码、论文、设计等复杂工作时，如何记录并证明人类究竟贡献了什么。** 传统的 Git commit、作者署名或 AI 水印主要关注“谁产生了最终内容”，却很难表达提出问题、定义目标、设计方案、选择路径、评价结果和最终决策这些越来越重要的人类认知贡献。BAC 可以进一步抽象为一种 **Human-AI Contribution Provenance（人机协作贡献溯源）** 框架，通过结构化、可验证、可审计的事件链记录 Human、AI、Tool 和 System 在整个创作过程中的行为及其因果关系，从而为“Human Agency（人类主体性）”提供证据，而不是武断地计算一个“人类贡献百分比”。如果将项目从工程工具进一步发展为明确的问题定义、贡献表示模型、开放数据格式和评测体系，并通过用户实验验证它相对于 Git、AI 水印和普通操作日志能否更准确地恢复和解释真实的人机贡献过程，那么它完全有潜力成为一篇有意思的 HCI / Software Engineering / AI Governance 论文。更长期来看，它甚至可能演化成一种 **AI 时代的贡献账本或 Human Agency Passport**：未来真正稀缺的不一定是谁敲了多少代码、写了多少文字，而是谁提出了关键问题、做出了关键判断，并有效地组织 AI 完成了工作。
+
+---
+
 请你：
 
 - 使用`ssh rn3`访问服务器，然后进入 `/docker/bensz-auto-contribution`（没有这个文件夹就创建），在这里布署docker-compose.yml、.env 或者其它必要的配置文件
