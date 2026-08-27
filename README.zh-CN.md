@@ -2,7 +2,7 @@
 
 # 🧭 Bensz Auto Contribution
 
-**面向人类-AI 软件协作的篡改可发现贡献归因系统**
+**面向人类—AI 软件协作的篡改可发现贡献记录器**
 
 [![Release](https://img.shields.io/github/v/tag/huangwb8/bensz-auto-contribution?label=release&color=blue)](https://github.com/huangwb8/bensz-auto-contribution/tags)
 [![Python](https://img.shields.io/badge/python-3.10%2B-3776AB.svg)](https://www.python.org/)
@@ -15,345 +15,196 @@
 
 ---
 
-## ✨ 项目简介
+## BAC 是什么？
 
-Bensz Auto Contribution，简称 **BAC**，是面向 AI 编程工具的贡献归因与审计系统。它的核心产物是 `.bac` 文件：一个绑定到具体项目、追加式、篡改可发现的贡献记录，用于区分哪些内容来自人类、哪些来自 AI、哪些来自工具执行，以及开发过程中观察到了哪些证据。
+用 AI 编程工具做项目时，最终 diff 只能告诉我们“哪些行变了”，通常不能告诉我们“这些变化是怎样产生的”。需求可能来自人类，实现方案可能由 AI 提出，测试结果则来自工具。如果最后只剩一句“作者修改了这些代码”，协作过程里最有价值的上下文就丢失了。
 
-BAC 不声称文件“绝对无法被修改”。它的目标是通过结构化事件、canonical JSON、哈希链、本地 checkpoint、项目上下文绑定，以及为签名和可信时间戳预留的字段，让篡改行为可被发现。
+**Bensz Auto Contribution（简称 BAC）** 是一个轻量命令行工具。它把这些上下文按发生顺序写进项目绑定的 `.bac` 文件：人类提出了什么、AI 生成或建议了什么、工具观察到了什么、文件实际变成了什么，以及人类何时审核或批准了结果。
 
-**🌟 核心亮点**：BAC 为 AI 编程会话提供可持续保存的审计轨迹。它帮助团队说明 AI 使用情况、复核协作边界、验证生成内容，并在需要时回溯开发过程，而不是把人类意图、AI 生成、工具输出和文件证据混成一团模糊描述。
+可以把它理解成开发过程的“黑匣子”。它帮助团队在事后讲清楚过程、复核协作边界、发现记录被改动的痕迹；它不是作者裁判，也不替代机构或项目规则。
 
-### 核心特性
+### 一分钟理解它的工作方式
 
-- 🧑‍💻 **人类-AI 贡献归因**：明确区分 `human`、`ai`、`tool`、`system` 四类来源。
-- 🎙️ **非文字输入友好**：通过来源通道、脱敏证据和 hash，为语音、转写等 AI 交互保留更清晰的人类作者贡献线索。
-- 🧾 **追加式事件模型**：用有序事件记录贡献历史，避免覆盖旧记录。
-- 🔗 **哈希链验证**：发现事件内容修改、插入、删除、重复或重排。
-- 📦 **单文件 `.bac` 容器**：使用 ZIP-based v2 账本，内部包含 `manifest.json` 和 canonical JSON 事件。
-- 🛡️ **清晰安全边界**：定位为 tamper-evident，不夸大成不可修改。
-- ⏱️ **隐私保护锚定**：支持 `local` 本地模式和 `hybrid` 本地+远程模式，远程只接收盲化摘要。
-- 🧠 **AI Tool 友好**：面向 Codex CLI、Claude Code 和其它 Agent 编程环境设计。
-- 🔍 **证据感知记录**：支持记录文件 hash、git diff 摘要、命令文本、退出码、测试结果和 checkpoint。
-- 🧼 **敏感信息脱敏**：默认避免写入密钥、完整私有提示词或无关用户数据。
+```text
+人类需求 → AI 方案/代码 → 文件变更 → 工具/测试证据 → 人类批准
+```
 
----
+每个箭头都会变成一条追加式事件。事件通过 hash 指向前一条记录，因此修改、删除或调换历史顺序会破坏链条。BAC 区分四类直接来源：
 
-<div align="center">
+| 来源 | 含义 | 常见例子 |
+| --- | --- | --- |
+| `human` | 人类提供了意图或做出了决定 | 需求、约束、审阅、手写修改、批准 |
+| `ai` | AI 生成或提出了工作 | 方案、代码草稿、重构、修复 |
+| `tool` | 程序产生了可观察结果 | 命令输出、测试结果、diff 摘要 |
+| `system` | BAC 自己记录的账本事件 | genesis、checkpoint、verification |
 
-### ⭐ 如果这个项目对你有帮助，请点个 Star 支持一下！
+这里的来源表示“这条记录从哪里来”，不是把所有功劳粗暴地归给某一方。
 
-构建可靠的 AI 协作贡献归因，需要认真设计、测试和威胁建模。你的 Star 能帮助更多开发者发现 BAC。
+## BAC 的理念
 
-[![Star History Chart](https://api.star-history.com/svg?repos=huangwb8/bensz-auto-contribution&type=Date)](https://star-history.com/#huangwb8/bensz-auto-contribution&Date)
+- **记录过程，不事后编故事。** 尽量在意图和证据产生时记录。
+- **批准不等于创作。** 人类接受 AI 代码时，保留 `ai_generation`，再追加独立的 `human_approval`。
+- **证据优先于声明。** 文件 hash、diff、命令退出码和测试结果，比未经核验的“已完成”更有用。
+- **默认保护隐私。** 人类输入默认只保存脱敏摘要和带域分离的 hash，不写入完整私有 prompt 或密钥。
+- **诚实描述安全性。** BAC 是 tamper-evident（篡改可发现），不是 tamper-proof（绝对防篡改）。有写权限的人仍可能重写本地文件，但这种重写更容易被验证器识别；可选的签名远程 receipt 能进一步检查尾部截断。
+- **人类始终在回路中。** 账本支持复核和争议重建，但不替代项目政策、机构规则或人的判断。
 
-</div>
+## 它适合什么场景？
 
----
+只要一个成果由人类和 AI 共同完成，BAC 就能帮助保留过程上下文：
 
-## 🚀 快速开始
+- **软件开发：** 把需求、生成代码、文件变更和测试证据串起来。
+- **科研与写作：** 区分草稿、人类修改、工具检查和最终批准。
+- **团队协作：** 复原谁做了什么决定、哪些内容由 AI 提出、哪些结果确实被工具观察到。
 
-### 环境要求
+无论在哪种场景，规则都一样：记录每一步的来源和证据，不要从最终文档倒推所有权。
+
+## 五分钟快速开始
+
+### 环境与安装
 
 - Python 3.10+
-- 无运行时第三方依赖
-
-### 安装
+- 运行时无第三方依赖
 
 ```bash
 python -m pip install bensz-auto-contribution
-
-# 从源码或开发模式安装
+# 或在源码目录中：
 python -m pip install -e .
 ```
 
-### 基础使用
+### 初始化并记录一次协作
 
-创建单文件 `.bac` 容器，并写入 genesis event：
+在目标项目根目录执行。默认账本是 `docs/contribution.bac`；如果 `docs/` 不存在，`bac init` 会自动创建。
 
 ```bash
+# 1. 创建与项目绑定的 .bac 容器
 bac init
-```
 
-记录人类需求：
-
-```bash
-bac record \
-  --event-type human_instruction \
-  --source-type human \
-  --summary "Add BAC verification workflow"
-```
-
-AI tool 宿主应在收到用户输入框消息时立即记录人类输入。这是捕捉人类意图的主路径，默认不保存完整私有 prompt：
-
-```bash
+# 2. 记录人类需求（AI tool 宿主收到消息时应立即执行）
 bac input record \
   --host codex \
   --session-id s1 \
   --message-index 1 \
   --message-file /tmp/user-message.txt
-```
 
-`Prompts.md` 等 prompt log 只是补录或交叉验证用的补充证据：
+# 3. 分开记录 AI 工作和工具观察
+bac record --event-type ai_generation --source-type ai \
+  --summary "实现哈希链验证器"
+bac record --event-type test_result --source-type tool \
+  --summary "单元测试通过" \
+  --command-text "python -m pytest -q" --exit-code 0
 
-```bash
-bac input import-log --source-file Prompts.md
-```
-
-记录 AI 生成或实现意图：
-
-```bash
-bac record \
-  --event-type ai_generation \
-  --source-type ai \
-  --summary "Implemented hash-chain verifier"
-```
-
-记录工具执行结果：
-
-```bash
-bac record \
-  --event-type test_result \
-  --source-type tool \
-  --summary "Unit tests passed" \
-  --command-text "python -m unittest discover -s tests -v" \
-  --exit-code 0
-```
-
-记录本地 checkpoint，降低尾部截断风险：
-
-```bash
-bac record \
-  --event-type checkpoint \
-  --source-type system \
-  --summary "Local checkpoint"
-```
-
-验证完整性：
-
-```bash
+# 4. 验证并查看时间线
 bac verify
-```
-
-为机械性 stale-tail 账本尾部分叉生成修复计划。该命令默认 dry-run，不写入 `.bac` 文件：
-
-```bash
-bac repair stale-tail --json
-```
-
-日常 CLI 写入会通过项目目录外的单账本 OS 锁串行化，避免两个 `bac record` 同时基于同一旧 head 写入。每次追加都会在同目录重建临时 ZIP 容器，校验通过后再原子替换账本，而不是原地修改 ZIP 尾部。`repair stale-tail` 主要用于修复历史账本、外部集成或异常合并已经留下的尾部断链。
-
-确认计划后再显式应用：
-
-```bash
-bac repair stale-tail --json --apply
-```
-
-查看贡献时间线：
-
-```bash
 bac inspect
 ```
 
-提取人类贡献，并可按日期过滤：
+对于 AI tool 集成，推荐在宿主收到用户消息的时刻调用 `bac input record`。它记录低敏的人类输入 provenance，而不是完整 prompt。`Prompts.md` 导入适合历史补录或交叉核验，但不应成为系统正确性的唯一来源。
+
+所有命令都支持 `--root`（指定目标项目）和 `--bac-file`（指定自定义账本路径）。`init`、`record`、`input`、`verify`、`repair`、`inspect` 还支持 `--json`，便于 AI tool 和自动化流程调用。
+
+## `.bac` 文件里有什么？
+
+默认文件是一个基于 ZIP 的 v2 容器，但用户通常只需维护这一个文件：
+
+```text
+docs/contribution.bac
+├── manifest.json
+└── events/
+    ├── 000000000001.json
+    └── 000000000002.json
+```
+
+`manifest.json` 保存项目绑定和存储约定；每条事件是 canonical JSON，包含：
+
+- 事件类型、直接来源、信任等级和时间戳；
+- 项目上下文（根目录绑定、git commit/branch、工作区状态）；
+- 描述工作内容的 payload（摘要、命令或文件快照）；
+- 文件 hash、diff 摘要、退出码、测试结果等 evidence；
+- `prev_event_hash` 与 `event_hash`，共同形成可验证哈希链。
+
+验证器会检查 ZIP 结构、重复路径、事件编号连续性、manifest/genesis 一致性、来源语义和重算后的哈希链。字段级示例见 [BAC 工作原理教程](docs/bac-tutorial.md)。
+
+## 常见工作流
+
+### 查看人类贡献
 
 ```bash
 bac inspect --human
-bac inspect --human --on 2026-05-31
 bac inspect --source-type human --since 2026-05-01 --until 2026-05-31 --json
 ```
 
-日期形式的 `--since`、`--until` 和 `--on` 按 UTC 自然日解释。`--until 2026-05-31` 会包含该 UTC 日期结束前的事件；如需精确边界，可传 ISO-8601 时间戳。
+只写日期时按 UTC 自然日解释；需要精确边界时传 ISO-8601 时间戳。人类批准 AI 工作时，应追加指向前序 AI 事件的 `human_approval`；BAC 不会因此把 AI 生成改写成人类创作。
 
-所有命令都支持 `--root` 指定目标项目根目录，支持 `--bac-file` 指定自定义 `.bac` 路径。`init`、`record`、`input`、`verify`、`repair`、`inspect` 均支持 `--json` 输出，便于 AI tool 或其它自动化流程调用。
+### Checkpoint、修复与并发写入
 
-### 隐私保护锚定流程
+```bash
+bac record --event-type checkpoint --source-type system --summary "记录当前 head hash"
+bac repair stale-tail --json              # 只生成计划
+bac repair stale-tail --json --apply      # 审阅计划后再应用
+```
 
-`bac init` 默认使用 `hybrid` 模式，但账本仍然本地优先。生成远程请求时只输出盲化 `anchor_hash`，不会上传 `.bac` 内容、文件路径、diff、prompt、actor、项目名或原始 `head_hash`：
+日常写入使用单账本 OS 锁，在锁内读取最新 head、重建临时容器、验证后原子替换，保护并发 `bac record`。`repair stale-tail` 是严格受限的维护命令：只允许修复机械性尾部分叉，拒绝内容/归因修改、signed 或 anchored 事件、checkpoint 以及非尾部断链。
+
+### 可选的隐私保护锚定
+
+`bac init` 默认是本地优先的 `hybrid` 模式。请求只发送盲化 `anchor_hash`（可选低敏 client summary），不上传 `.bac` 内容、路径、diff、prompt、actor、项目名或原始 head hash。
 
 ```bash
 bac anchor request --json
-```
-
-导入锚定服务返回的签名 receipt：
-
-```bash
 bac anchor import --receipt-file receipt.json --public-key "$ANCHOR_PUBLIC_KEY"
 bac verify --require-anchor
 ```
 
-配置服务端后可直接推送：
-
-```bash
-bac config set anchor.url http://localhost:8080
-bac anchor push --allow-insecure-anchor-url
-```
-
-`bac anchor push` 默认只允许安全的公网 `https://` 地址，并会检查域名解析结果是否指向私有或本地地址。显式的不安全开关仅用于本地开发。生产锚定服务如要求写入 token，可传 `--token` 或设置 `BAC_ANCHOR_API_TOKEN`；BAC 不会把该 token 写入 `.bac`。
-
-也可以使用 BAC Cloud 工作流把本地项目绑定到你部署的服务端。用户先注册或登录拿到 token，token 会保存在本机用户配置目录，不写入 `.bac`：
-
-```bash
-bac cloud register --url https://bac.example.com --email user@example.com
-bac cloud login --url https://bac.example.com --email user@example.com
-bac cloud link --url https://bac.example.com --ledger-name my-project
-bac cloud status
-```
-
-`bac cloud link` 会创建云端 ledger，把本地 `.bac` 配置为 `hybrid`、`anchor.require true` 和 `cloud.auto_anchor true`，并立即对绑定后的账本 head 做一次远程锚定。之后正常执行 `bac record` 时，本地仍然追加完整 `.bac` 事件，同时自动把盲化 `anchor_hash` 和低敏 `client_summary` 上传到 BAC 服务端，服务端返回 signed receipt，本地再写入 anchored checkpoint。
-
-可选 reference server 位于 `server/`：
+自托管 reference server：
 
 ```bash
 docker compose -f server/docker-compose.yml up --build
 ```
 
-## 🧩 BAC 的定位
+`bac cloud register/login/link/status` 提供可选的面向用户流程。token 保存在本机用户配置中，不写入 `.bac`；生产锚定写入要求安全 HTTPS 和 token。
 
-BAC 是过程记录与辅助审计系统，不是最终贡献裁判。
+## 安全边界：它能证明什么，不能证明什么？
 
-在 AI 辅助科研、写作和软件开发场景中，BAC 可以记录人类需求、约束、审阅、手写修改、最终批准，也可以记录 AI 草稿、重构建议、生成代码、命令输出、测试、引用检查、构建日志、文件快照和 diff 摘要。
+BAC 能发现事件内容被编辑、事件缺失或重排、重复 ZIP 成员、哈希链断裂、checkpoint 不一致和常见的来源漂白模式。它不能保证现实中的每个动作都被记录，也不能阻止有写权限的人重写账本，更不能单独裁定作者、版权或责任。远程签名 receipt 只能证明某个盲化 head 在服务端时间点存在，不能证明历史记录完整无缺。
 
-在 AI 编程会话中，最稳定的一手人类输入来源是用户提交给 AI tool 宿主的消息。`bac input record` 会写入 `source_type=human` 事件，包含摘要、脱敏摘录、来源通道、可选 host/session/index，以及带 BAC 域分离的消息 hash。它默认不保存完整 prompt。消息 hash 是有用的审计证据，但对短 prompt 或容易猜测的 prompt 并不是零泄露隐私保证。
+因此，`.bac` 应被理解为**带有明确边界、可复核的过程证据**，而不是不可质疑的真相来源。
 
-随着 AI 交互从文字输入扩展到语音、听写、屏幕操作或其它非文字工作流，BAC 的事件模型会更适合忠实保留人类作者贡献。AI tool 宿主提供的转写文本、输入通道元数据或其它低敏证据，可以作为 `source_type=human` 事件的 provenance 和 evidence 进入账本；后续 AI 生成内容仍然单独记录为 AI 工作，不会被改写成人类原创。
+## 新用户常问
 
-如果用户把日志、网页文本、生成代码或其它第三方材料粘贴进 prompt，BAC 记录的是“人类提交了这些上下文”，不会自动声明被粘贴片段都由人类原创。
+**需要记录每一次按键吗？** 不需要。记录有意义的阶段即可：意图、AI 工作、文件证据、工具结果和批准。AI tool 宿主可以自动记录最早的人类输入事件。
 
-批准不等于创作来源。人类采纳 AI 产物时，应先记录 `ai_generation/source_type=ai`，再追加独立的 `human_approval/source_type=human` 事件。把 AI 生成内容或 AI 驱动的文件修改改写成人类创作，属于贡献来源漂白。
+**初始化前发生的工作还能还原吗？** 只能依赖手头仍保留的证据。prompt log 或导入的笔记可以帮助补录，但事后记录天然弱于当时记录。
 
-这些记录可以支持 AI 使用披露、内部复核、合规说明和争议回溯。它不会自动判定学术署名、法律归属或最终责任；这些判断仍然需要结合项目制度、机构规则、期刊规范和人工判断。
+**`.bac` 是作者证明或法律凭证吗？** 不是。它是可复核的过程记录；作者归属和责任仍由机构、期刊、合同和相关人员决定。
 
-## 📦 `.bac` 格式
+**验证失败怎么办？** 先阅读验证报告。如果只是机械性尾部分叉，可用 `bac repair stale-tail` 生成受限的 dry-run 计划；涉及内容或归因重写时，命令会拒绝执行。
 
-默认文件为 `docs/contribution.bac`。如果项目根目录下还没有 `docs/`，`bac init` 会自动创建。从外部看它是一个文件；内部是 ZIP 容器，至少包含：
-
-```text
-manifest.json
-events/000000000001.json
-events/000000000002.json
-```
-
-`manifest.json` 记录容器版本、事件格式、项目绑定信息、初始事件 hash 和存储约定。`events/` 下每个文件是一条 canonical JSON 事件，文件名从 `000000000001.json` 开始连续递增。
-
-每条 BAC 事件包含：
-
-- `format`：当前为 `bac.event.v2`
-- `event_type`：如 `genesis`、`human_instruction`、`ai_generation`、`tool_command`、`file_change`、`test_result`、`checkpoint`
-- `source_type`：固定为 `human`、`ai`、`tool`、`system` 之一；它记录事件的直接来源，不是偏好的署名标签
-- `trust_level`：固定为 `declared`、`observed`、`signed`、`verified`、`anchored` 之一；`signed` 在事件签名实现前保留不可用，`anchored` 只对带有效远程 receipt 的 checkpoint 事件成立
-- `project`：项目根路径、项目绑定 hash、git remote、commit、branch 和 dirty 状态
-- `payload`：摘要、命令、文件快照或事件特定内容
-- `evidence`：diff 摘要、文件 hash、命令结果或其它可验证证据
-- `redactions`：被脱敏的字段与原因
-- `prev_event_hash` 与 `event_hash`：形成可验证哈希链
-
-人类批准 AI 或工具产物时，可以在 payload 中链接被批准事件：
-
-```json
-{
-  "event_type": "human_approval",
-  "source_type": "human",
-  "payload": {
-    "summary": "Human approved AI-generated implementation",
-    "approves_event_hash": "sha256:<previous-ai-event-hash>",
-    "approval_scope": "accept_for_merge"
-  }
-}
-```
-
-验证器会检查文件是否为有效 ZIP 容器、内部路径是否重复、事件编号是否连续、manifest 是否与 genesis 事件一致，以及事件哈希链是否可复算。
-
-字段解释和工作原理见 [BAC 工作原理教程](docs/bac-tutorial.md)。
-
-## 🛡️ 安全模型
-
-BAC 是 **tamper-evident**，即篡改可发现；它不是 tamper-proof。
-
-它可以发现常见完整性问题，例如事件内容被编辑、事件缺失、事件重排、ZIP 内部路径重复、事件编号断裂、genesis 元数据不一致、哈希链断裂和 checkpoint 不一致。
-
-它也会检查常见贡献来源漂白攻击的归因语义。例如 `ai_generation` 必须使用 `source_type=ai`，`human_approval` 必须使用 `source_type=human`，`tool_command` 与 `test_result` 必须使用 `source_type=tool`，`genesis`、`checkpoint`、`verification` 等系统事件必须使用 `source_type=system`。`human_approval.payload.approves_event_hash` 必须指向同一账本中的前序事件。
-
-对于人类输入事件，`bac verify` 会校验 `payload.input_provenance` 和配套的脱敏 evidence。若账本存在 AI 活动但没有任何人类输入 provenance，验证会给出 warning，提示人类贡献可能被漏记。
-
-如果没有外部 anchor，纯本地哈希链不能完全防止尾部截断。因此 BAC 支持本地 checkpoint 和远程签名 receipt。有效 receipt 只能证明某个盲化账本 head 在服务端时间戳时已经存在；它不证明现实中的所有操作都被记录。
-
-日常写入使用单账本 OS 锁和原子容器替换：写入者会等待账本锁，在临界区内读取最新 head，在目标账本旁边写出并校验临时 ZIP，只有新容器验证通过后才替换旧账本。锁由解析后的 `.bac` 路径派生，并保存在项目目录外，因此普通写入不会在账本旁边留下 `.bac.lock` sidecar 文件。如果旧版本 BAC 已经留下项目内 sidecar lock，确认没有 BAC 命令运行后可以删除。这样可以让多 agent 的普通写入保持串行，并避免追加失败时半写入原 ZIP central directory。
-
-`bac repair stale-tail` 是显式、受限的维护命令，只用于修复历史账本中已经存在的机械性旧 head 尾部分叉，例如并发追加、基于旧 head 写入或 git 回退/合并造成的尾部断链。它只允许改写尾部 `prev_event_hash` 和由此必然变化的 `event_hash`，拒绝内容或归因字段变化，拒绝 signed、anchored 或 checkpointed 尾部事件；默认只 dry-run，实际应用后会追加 tool repair record 和本地 checkpoint。
-
-验证器会把 `.bac` 文件视为不可信输入，在读取前限制容器总大小、事件数量和单个 JSON 成员大小。reference anchor server 在本地开发中保持易用，但生产模式要求 bearer token 保护写入、管理页面和账本 receipt 查询。
-
-## 🧪 开发与验证
-
-运行测试：
+## 开发与测试
 
 ```bash
 python -m pytest -q
 python -m unittest discover -s tests -v
-```
-
-当前测试覆盖 canonicalization、v2 容器结构、哈希链复算、篡改检测、重复内部路径检测、checkpoint 验证、隐私锚定 receipt 验签、敏感信息脱敏、服务端 API 和 CLI 端到端流程。
-
-本地构建并检查 PyPI 发布包：
-
-```bash
 python -m pip install --upgrade build twine
 python -m build
 python -m twine check dist/*
 ```
 
-项目通过 GitHub Actions 和 PyPI Trusted Publishing 发布到 PyPI。详见 [PyPI 发布流程](docs/pypi-release.md)。
+测试覆盖 canonicalization、v2 容器、哈希链、篡改检测、脱敏、checkpoint、私有 anchor receipt、服务端流程和 CLI 端到端行为。发布流程见 [PyPI 发布](docs/pypi-release.md) 与 [DockerHub 发布](docs/dockerhub-release.md)。
 
-直接发布 BAC Anchor Server 的 DockerHub `linux/amd64` 镜像：
-
-```bash
-make dockerhub-publish
-```
-
-详见 [DockerHub 发布流程](docs/dockerhub-release.md)。这条路径面向本地机器或自建发布机，不经过 GitHub Actions。
-
-## 🗂️ 目录结构
+## 仓库导航
 
 ```text
-bensz-auto-contribution/
-├── AGENTS.md
-├── CHANGELOG.md
-├── CLAUDE.md
-├── LICENSE
-├── README.md
-├── README.zh-CN.md
-├── docs
-│   ├── bac-tutorial.md
-│   ├── dockerhub-release.md
-│   ├── pypi-release.md
-│   └── plans
-├── Makefile
-├── pyproject.toml
-├── src
-│   └── bac
-│       ├── adapters
-│       ├── core
-│       ├── report
-│       ├── service
-│       └── storage
-├── tests
-├── tools
-└── server
+src/bac/       CLI、事件模型、存储、验证、锚定、报告
+tests/         客户端与端到端测试
+server/        可选的 reference anchor server
+docs/          BAC 教程、发布指南和计划
 ```
 
-## 🤖 AI 辅助开发
+## 参与贡献
 
-本仓库包含 AI 编程工具项目指令：
+欢迎围绕 `.bac` 格式、威胁模型、AI tool 适配器、验证逻辑、签名/时间戳和开发者体验提交 issue 或 pull request。修改归因逻辑时请保持边界准确：BAC 记录过程与证据，不宣称不可修改的最终归属。
 
-- `AGENTS.md` 用于 OpenAI Codex CLI
-- `CLAUDE.md` 用于 Claude Code
-
-修改贡献归因逻辑时，需要保持安全边界表述准确：BAC 提供可验证、篡改可发现的记录，不应被描述成无法修改。
-
-## 🤝 贡献
-
-欢迎围绕 `.bac` 文件格式、威胁模型、AI tool 集成、验证逻辑、签名与时间戳、开发者体验提交 Issue 和 Pull Request。
-
-## 📄 许可证
+## 许可证
 
 MIT License
