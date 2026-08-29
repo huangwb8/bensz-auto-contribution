@@ -115,57 +115,6 @@ P1 只使用前两层；推断事件仅用于探索性分析，不能被包装�
 
 领域固定为软件工程、科研分析和临床病例讨论模拟。临床部分只使用脱敏模拟病例，不提供或替代医疗建议。
 
-### 生产环境观察与嵌套回放（S6）
-
-**为什么做。** 模拟任务能够控制真值和随机化，但无法回答 BAC 在持续、混杂、会话边界不整齐的真实项目中是否真的可用。生产层用于补足生态效度，观察记录器面对长短不一的任务、脏工作区、缺失 Git 上下文和不稳定人工批准时的实际表现。
-
-**现有生产盘点（可行性快照）。** 2026-08-29 在用户明确授权的五个只读目录中，排除明显的 `tmp`、`.bensz-api` 和 `.git` 中间产物后，发现 24 个 `.bac` 账本，累计 6,361 条事件、容器文件约 5.69 MB。单账本事件数为 2–3,607 条，中位数 79；记录跨度约 0.014–88.8 天，中位数约 2.03 天。24 个账本均有连续事件序号且至少含一条 evidence，22 个同时出现 human/ai/tool/system 四类来源；只有 5 个包含 `human_approval`，20 个 manifest 显示工作区 dirty，2 个缺少 Git commit 绑定。该快照包含少量历史/legacy 账本，正式分析时按 canonical、历史和项目类型分层；由于生产账本仍会增长，实施前必须重新生成同口径快照。
-
-使用当前版本验证器对这 24 个账本做只读复核后，6 个为 `pass`、15 个为 `warn`、3 个为 `fail`，共记录 443 条 warning。warning 主要是 `actor.declared_kind` 与 `source_type` 不一致；fail 例涉及 checkpoint 来源语义不符和账本内 `project.root_hash` 变化。这里的 fail 不是自动等同于恶意篡改，必须由版本迁移、项目重绑定、记录器缺陷和真实完整性破坏四类原因进行人工复核；外部生产目录不得为了“变成 pass”而执行 repair。
-
-上述数字只证明真实运行已产生可分析材料，也提供了 BAC 具备发现语义冲突和上下文变化的初步信号，不是 BAC 优于 Git 的疗效证据。由于这些账本来自同一使用者及其项目生态，还存在选择偏差、操作者效应和项目间非独立性。它们同时暴露四个必须进入研究的真实问题：批准事件不能假定存在；dirty 或缺失 Git 上下文是常态而非异常；事件量和观察跨度高度偏斜，不能用简单项目平均数掩盖长账本的影响；验证器 warning/fail 可能同时包含产品缺陷、历史兼容性和真正异常。
-
-**生产项目路径登记（实施索引）。** 以下是本次快照中纳入观察队列的账本路径。路径仅供后续实施定位和复核，不进入论文公开数据集；所有外部路径严格只读。`legacy` 文件与 canonical 账本先分层，不能直接合并为同一项目的独立样本。
-
-```text
-/Volumes/2T01/Github/auth-paper-mail/docs/contribution.bac
-/Volumes/2T01/Github/bensz-auto-contribution/docs/contribution.bac
-/Volumes/2T01/Github/bensz-notes/docs/contribution.bac
-/Volumes/2T01/Github/bensz-router/docs/contribution.bac
-/Volumes/2T01/Github/skills/docs/contribution.bac
-/Volumes/2T01/Github/sub2api/docs/contribution.bac
-/Volumes/2T01/Github/sub2api-official/docs/contribution.bac
-/Volumes/2T01/Github/vibe-teaching/nsfc-demo/docs/contribution.bac
-/Volumes/2T01/winE/PythonCloud/Agents/pipelines/deep_research/docs/contribution.bac
-/Volumes/2T01/winE/PythonCloud/Agents/pipelines/insight_synthesis/docs/contribution.bac
-/Volumes/2T01/winE/PythonCloud/Agents/pipelines/know_github/docs/contribution.bac
-/Volumes/2T01/winE/PythonCloud/Agents/pipelines/marketing_copy/docs/contribution.bac
-/Volumes/2T01/winE/PythonCloud/Agents/pipelines/papers/docs/contribution.bac
-/Volumes/2T01/winE/PythonCloud/Agents/pipelines/reviews/docs/contribution.bac
-/Volumes/2T01/winE/PythonCloud/Agents/pipelines/visual_explainer/docs/contribution.bac
-/Volumes/2T01/winE/iProjects/Fundings/2026-GD-AI4Science/docs/contribution.bac
-/Volumes/2T01/winE/iProjects/Fundings/2026-GD-AI4Science/docs/contribution.legacy-root-20260615.bac
-/Volumes/2T01/winE/iProjects/Fundings/2026-全国高校生物医药区域技术转移转化粤港澳大湾区中心项目/docs/contribution.bac
-/Volumes/2T01/winE/iProjects/Fundings/2026-区域联合基金-地区培育项目/docs/contribution.bac
-/Volumes/2T01/winE/iProjects/Fundings/2026-区域联合基金-地区培育项目-legacy/docs/contribution.bac
-/Volumes/2T01/winE/iProjects/Manuscripts/GDQYLH_2026/docs/contribution.bac
-/Volumes/2T01/winE/iProjects/RCheck/GSClassifier/routine02/docs/contribution.bac
-/Volumes/2T01/winE/RCloud/RFactory/ccs/docs/contribution.bac
-/Volumes/2T01/winE/我的坚果云/MyNotes/docs/contribution.bac
-```
-
-实施开始时应重新扫描上述五个根目录，记录新增、迁移、消失和重复路径；不得默认为历史快照永久有效。
-
-**第一层：全量只读自然观察。** 对所有符合纳入条件的生产账本生成去标识化统计：事件数和增长曲线、四类来源覆盖、关键事件覆盖、evidence 链接率、验证/警告/失败及错误类别、checkpoint 和 approval 出现率、会话跨度、写入失败或中断、账本体积、工作区 dirty 与 Git 绑定缺失。每个 warning/fail 由独立复核表标记为记录器/版本迁移问题、项目上下文变化、可解释缺失或未解释异常；不得把不同原因合并成单一“失败率”。按项目类型（软件、pipeline/内容、科研/基金/论文、R）和账本规模分层，保留零事件缺失和低覆盖项目，不事后删除“表现不好”的项目。外部目录严格只读，不复制原始 `.bac`、完整 prompt、密钥或无关路径；只在当前研究工作区保存聚合统计和脱敏项目编号。
-
-**第二层：真实工作片段的嵌套盲法回放。** 从生产账本按项目类型、事件规模（小/中/大）、是否存在 approval、是否 dirty 和时间跨度分层抽取工作片段，目标至少 24 个独立片段；若可用片段不足则全部纳入并只作估计和置信区间，不声称确认性效果。片段边界按预注册的 `session_started`、人类输入、checkpoint 及连续无事件时间间隔确定，不能按结果好坏挑选。
-
-由不参与 BAC 视图生成的两名编码员，仅使用 BAC 之外仍可取得的版本历史、命令/CI 输出、文件差异、参与者明确确认和其他原始材料建立独立真值包；只能从 BAC 得到的事实标记为缺失，不计入确认性评分。随后从同一可用事实生成 Git、Git+普通日志和 BAC 回放视图，审计者随机看到一种视图，回答与 P1 相同的问题。视图顺序、审计者、片段和项目均记录，以混合模型处理重复观测；审计者与编码员不得看到另一条件或原始 BAC 全文。
-
-**预期解释。** 全量观察若显示长期运行、来源覆盖和 evidence 记录稳定，支持 BAC 的部署可行性；若只有少数项目具备 approval 或 Git 完整绑定，则把“批准漏记”和“上下文缺失”作为实施性缺陷报告。嵌套回放若 BAC 相对 Git+普通日志方向一致，可作为 P1 的外部效度支持；若方向不一致或优势只在高事件量项目出现，则收缩适用范围并报告规模交互。
-
-**触发式调整。** 生产账本若无法从 BAC 之外重建足够真值，不得用 BAC 自身补齐，只保留自然观察结果。若项目选择偏差明显，使用全量队列描述、分层权重和敏感性分析，不伪造随机化。若真实片段中 human provenance、approval 或 Git 绑定缺失率超过预设阈值，追加一次“缺失机制”分析；不因此修改 P1 主要终点。任何生产观察结果都不得反向改变已冻结的模拟任务、比较对象或样本量。
-
 ### 主实验：贡献边界恢复（P1）
 
 **为什么做。** 这是 BAC 最核心、最可证伪的效用主张，直接检验它是否帮助独立审计者解释人类与 AI 的协作过程。
@@ -216,6 +165,57 @@ P1 只使用前两层；推断事件仅用于探索性分析，不能被包装�
 
 反馈复盘 S5 采用个人或团队为随机化单位的平行 2×2 设计：输入记录（关闭/自动 `bac input record`）× 复盘界面（聊天/Git/BAC 事件视图）。只有 P1 数据锁定、质量门槛达标且资源允许时启动；比较反馈可执行性、失败定位、下一轮错误避免率、责任边界清晰度、阅读时间和中断次数。该实验不与 P1 合并分析。
 
+### 生产环境观察与嵌套回放（S6）
+
+**为什么做。** 模拟任务能够控制真值和随机化，但无法回答 BAC 在持续、混杂、会话边界不整齐的真实项目中是否真的可用。生产层用于补足生态效度，观察记录器面对长短不一的任务、脏工作区、缺失 Git 上下文和不稳定人工批准时的实际表现。该层安排在模拟主实验及支持性实验完成后，作为最后的外部效度检验。
+
+**现有生产盘点（可行性快照）。** 2026-08-29 在用户明确授权的五个只读目录中，排除明显的 `tmp`、`.bensz-api` 和 `.git` 中间产物后，发现 24 个 `.bac` 账本，累计 6,361 条事件、容器文件约 5.69 MB。单账本事件数为 2–3,607 条，中位数 79；记录跨度约 0.014–88.8 天，中位数约 2.03 天。24 个账本均有连续事件序号且至少含一条 evidence，22 个同时出现 human/ai/tool/system 四类来源；只有 5 个包含 `human_approval`，20 个 manifest 显示工作区 dirty，2 个缺少 Git commit 绑定。该快照包含少量历史/legacy 账本，正式分析时按 canonical、历史和项目类型分层；由于生产账本仍会增长，实施前必须重新生成同口径快照。
+
+使用当前版本验证器对这 24 个账本做只读复核后，6 个为 `pass`、15 个为 `warn`、3 个为 `fail`，共记录 443 条 warning。warning 主要是 `actor.declared_kind` 与 `source_type` 不一致；fail 例涉及 checkpoint 来源语义不符和账本内 `project.root_hash` 变化。这里的 fail 不是自动等同于恶意篡改，必须由版本迁移、项目重绑定、记录器缺陷和真实完整性破坏四类原因进行人工复核；外部生产目录不得为了“变成 pass”而执行 repair。
+
+上述数字只证明真实运行已产生可分析材料，也提供了 BAC 具备发现语义冲突和上下文变化的初步信号，不是 BAC 优于 Git 的疗效证据。由于这些账本来自同一使用者及其项目生态，还存在选择偏差、操作者效应和项目间非独立性。它们同时暴露四个必须进入研究的真实问题：批准事件不能假定存在；dirty 或缺失 Git 上下文是常态而非异常；事件量和观察跨度高度偏斜，不能用简单项目平均数掩盖长账本的影响；验证器 warning/fail 可能同时包含产品缺陷、历史兼容性和真正异常。
+
+**生产项目路径登记（实施索引）。** 以下是本次快照中纳入观察队列的账本路径。路径仅供后续实施定位和复核，不进入论文公开数据集；所有外部路径严格只读。`legacy` 文件与 canonical 账本先分层，不能直接合并为同一项目的独立样本。
+
+```text
+/Volumes/2T01/Github/auth-paper-mail/docs/contribution.bac
+/Volumes/2T01/Github/bensz-auto-contribution/docs/contribution.bac
+/Volumes/2T01/Github/bensz-notes/docs/contribution.bac
+/Volumes/2T01/Github/bensz-router/docs/contribution.bac
+/Volumes/2T01/Github/skills/docs/contribution.bac
+/Volumes/2T01/Github/sub2api/docs/contribution.bac
+/Volumes/2T01/Github/sub2api-official/docs/contribution.bac
+/Volumes/2T01/Github/vibe-teaching/nsfc-demo/docs/contribution.bac
+/Volumes/2T01/winE/PythonCloud/Agents/pipelines/deep_research/docs/contribution.bac
+/Volumes/2T01/winE/PythonCloud/Agents/pipelines/insight_synthesis/docs/contribution.bac
+/Volumes/2T01/winE/PythonCloud/Agents/pipelines/know_github/docs/contribution.bac
+/Volumes/2T01/winE/PythonCloud/Agents/pipelines/marketing_copy/docs/contribution.bac
+/Volumes/2T01/winE/PythonCloud/Agents/pipelines/papers/docs/contribution.bac
+/Volumes/2T01/winE/PythonCloud/Agents/pipelines/reviews/docs/contribution.bac
+/Volumes/2T01/winE/PythonCloud/Agents/pipelines/visual_explainer/docs/contribution.bac
+/Volumes/2T01/winE/iProjects/Fundings/2026-GD-AI4Science/docs/contribution.bac
+/Volumes/2T01/winE/iProjects/Fundings/2026-GD-AI4Science/docs/contribution.legacy-root-20260615.bac
+/Volumes/2T01/winE/iProjects/Fundings/2026-全国高校生物医药区域技术转移转化粤港澳大湾区中心项目/docs/contribution.bac
+/Volumes/2T01/winE/iProjects/Fundings/2026-区域联合基金-地区培育项目/docs/contribution.bac
+/Volumes/2T01/winE/iProjects/Fundings/2026-区域联合基金-地区培育项目-legacy/docs/contribution.bac
+/Volumes/2T01/winE/iProjects/Manuscripts/GDQYLH_2026/docs/contribution.bac
+/Volumes/2T01/winE/iProjects/RCheck/GSClassifier/routine02/docs/contribution.bac
+/Volumes/2T01/winE/RCloud/RFactory/ccs/docs/contribution.bac
+/Volumes/2T01/winE/我的坚果云/MyNotes/docs/contribution.bac
+```
+
+实施开始时应重新扫描上述五个根目录，记录新增、迁移、消失和重复路径；不得默认为历史快照永久有效。
+
+**第一层：全量只读自然观察。** 对所有符合纳入条件的生产账本生成去标识化统计：事件数和增长曲线、四类来源覆盖、关键事件覆盖、evidence 链接率、验证/警告/失败及错误类别、checkpoint 和 approval 出现率、会话跨度、写入失败或中断、账本体积、工作区 dirty 与 Git 绑定缺失。每个 warning/fail 由独立复核表标记为记录器/版本迁移问题、项目上下文变化、可解释缺失或未解释异常；不得把不同原因合并成单一“失败率”。按项目类型（软件、pipeline/内容、科研/基金/论文、R）和账本规模分层，保留零事件缺失和低覆盖项目，不事后删除“表现不好”的项目。外部目录严格只读，不复制原始 `.bac`、完整 prompt、密钥或无关路径；只在当前研究工作区保存聚合统计和脱敏项目编号。
+
+**第二层：真实工作片段的嵌套盲法回放。** 从生产账本按项目类型、事件规模（小/中/大）、是否存在 approval、是否 dirty 和时间跨度分层抽取工作片段，目标至少 24 个独立片段；若可用片段不足则全部纳入并只作估计和置信区间，不声称确认性效果。片段边界按预注册的 `session_started`、人类输入、checkpoint 及连续无事件时间间隔确定，不能按结果好坏挑选。
+
+由不参与 BAC 视图生成的两名编码员，仅使用 BAC 之外仍可取得的版本历史、命令/CI 输出、文件差异、参与者明确确认和其他原始材料建立独立真值包；只能从 BAC 得到的事实标记为缺失，不计入确认性评分。随后从同一可用事实生成 Git、Git+普通日志和 BAC 回放视图，审计者随机看到一种视图，回答与 P1 相同的问题。视图顺序、审计者、片段和项目均记录，以混合模型处理重复观测；审计者与编码员不得看到另一条件或原始 BAC 全文。
+
+**预期解释。** 全量观察若显示长期运行、来源覆盖和 evidence 记录稳定，支持 BAC 的部署可行性；若只有少数项目具备 approval 或 Git 完整绑定，则把“批准漏记”和“上下文缺失”作为实施性缺陷报告。嵌套回放若 BAC 相对 Git+普通日志方向一致，可作为 P1 的外部效度支持；若方向不一致或优势只在高事件量项目出现，则收缩适用范围并报告规模交互。
+
+**触发式调整。** 生产账本若无法从 BAC 之外重建足够真值，不得用 BAC 自身补齐，只保留自然观察结果。若项目选择偏差明显，使用全量队列描述、分层权重和敏感性分析，不伪造随机化。若真实片段中 human provenance、approval 或 Git 绑定缺失率超过预设阈值，追加一次“缺失机制”分析；不因此修改 P1 主要终点。任何生产观察结果都不得反向改变已冻结的模拟任务、比较对象或样本量。
+
 ## 实验计划
 
 ### 阶段 A：方案与合规冻结
@@ -225,6 +225,8 @@ P1 只使用前两层；推断事件仅用于探索性分析，不能被包装�
 ### 阶段 B：生产环境只读盘点
 
 在五个已授权生产目录中扫描 `.bac` 文件名和容器元数据，排除 `tmp`、`.bensz-api`、`.git` 等明显中间产物；不写入、不移动、不覆盖任何外部文件。先输出项目类型、账本规模、事件跨度、来源覆盖、evidence、approval、验证状态、Git 绑定和 dirty 状态的聚合表，再冻结生产观察队列和排除理由。
+
+本阶段只是实施前的只读盘点，不构成 S6 的正式生产观察或嵌套回放；正式 S6 按阶段 F 计划在模拟与支持性实验完成后最后执行。
 
 本阶段的盘点结果只作为可行性先验和缺失机制基线，不能用于宣称 BAC 优于 Git，也不能据此事后改变 P1 的任务、比较对象、主要终点或样本量。
 
@@ -242,9 +244,9 @@ P1 只使用前两层；推断事件仅用于探索性分析，不能被包装�
 
 冻结任务、视图生成器、分析代码和随机化方案；随机化正式审计者，按领域、条件和经验分层，每人完成 6 个任务。先完成 P1 主实验，保存结构化答案、解释、阅读时长、设备信息和全部排除/缺失记录。
 
-### 阶段 F：生产嵌套回放与支持性实验
+### 阶段 F：支持性实验与生产嵌套回放
 
-先按项目类型、事件规模、approval、dirty、Git 绑定和时间跨度分层抽取真实工作片段，完成 S6 的独立真值重建和盲法回放；再依次运行 S1 组件消融、S2 对抗审计和 S3 成本/隐私实验。S4 领域复制结果从主实验和编码资料中独立整理；S5 反馈复盘仅在资源和质量门槛允许时作为探索性扩展启动。
+在 P1 主实验完成后，依次运行 S1 组件消融、S2 对抗审计和 S3 成本/隐私实验；S4 领域复制结果从主实验和编码资料中独立整理；S5 反馈复盘仅在资源和质量门槛允许时作为探索性扩展启动。待上述模拟与支持性实验完成后，最后按项目类型、事件规模、approval、dirty、Git 绑定和时间跨度分层抽取真实工作片段，完成 S6 的独立真值重建和盲法回放。
 
 生产嵌套回放必须使用 BAC 之外的原始材料建立真值，无法独立确认的事实记为缺失；不得用 BAC 自身补齐真值。任何支持性实验不得回写或改变 P1 的主要终点。
 
@@ -270,6 +272,6 @@ S6 的全量生产观察报告项目/片段级分布、缺失机制、来源和 
 
 本计划以“BAC 是否改善人类—AI 贡献边界恢复”为唯一主线。Git 与 Git+普通日志是现有信息条件基线，BAC 及其消融用于检验结构化事件记录和组件机制；生产环境观察与嵌套回放补足真实部署证据；篡改检测、领域复制、成本隐私和反馈复盘均保留，但被明确放在次要或探索性层级。
 
-执行上先冻结定义和真值包，完成生产目录只读盘点，再完成视图与验证器、编码试标和 pilot，随后锁定正式数据并完成 P1，接着开展真实工作片段回放和其它支持性实验。所有分支都有预先规定的调整与停止规则，避免看到结果后扩展问题、增加比较对象或改变主要终点。
+执行上先冻结定义和真值包，完成生产目录只读盘点，再完成视图与验证器、编码试标和 pilot，随后锁定正式数据并完成 P1，接着开展 S1–S5 模拟与支持性实验，最后开展真实工作片段回放。所有分支都有预先规定的调整与停止规则，避免看到结果后扩展问题、增加比较对象或改变主要终点。
 
 研究的最终价值不在于证明 BAC 在所有场景都更好，而在于用模拟主实验和真实生产观察共同回答：当 Git 和常规日志已经提供底层事实时，BAC 的事件、来源、关系和验证状态是否为贡献审计带来独立且值得付出的收益，以及这种收益能否在自然工作流中稳定出现。
