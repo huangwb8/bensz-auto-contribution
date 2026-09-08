@@ -90,3 +90,4 @@ dmypy.json
 # *.backup
 .bensz-api/
 docs/deploy/20*/
+docs/ideas/

@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### Added（新增）
+
+- 按用户指定路径新增 `ideas/BAC_科研战略_v7_干预价值验证计划.md`：以真实人类保障性干预的条件效应为主要问题，前置独立结果对照与可恢复分支验证，明确预算公平性、pilot 与确认性实验的分离、统计精度和停止规则；保留 v6 与既有计划，不表示实验已执行。
+
 ### Changed（变更）
 
 - 加固 BAC Anchor Compose 部署：固定已核验镜像摘要，签名私钥改为只读 Compose secret，按服务最小注入环境变量，并将 PostgreSQL/Redis 隔离到 internal 后端网络。
