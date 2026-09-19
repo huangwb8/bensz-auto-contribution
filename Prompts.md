@@ -28,6 +28,40 @@ git-commit skill保存变更; 最后一个commit要新增 tag 为 v{version}，�
 
 # 日常
 
+---
+
+根据本项目的源代码，请您利用 research-idea (完整流程）为本项目量身定制一个切实可行、有创新性的课题方向。最后的结果保存为 docs/ideas/v19.md。注意：全程不能查看 docs/ideas 里的文件（除了你要生成的结果md外）。
+
+---
+
+根据本项目的源代码，请您利用 research-idea (完整流程）为本项目量身定制一个切实可行、有创新性的课题方向。最后的结果保存为 docs/ideas/v18.md。注意：全程不能查看 docs/ideas 里的文件（除了你要生成的结果md外）。
+
+---
+
+根据本项目的源代码，请您利用 research-idea (完整流程）为本项目量身定制一个切实可行、有创新性的课题方向。最后的结果保存为 docs/ideas/v17.md。注意：全程不能查看 docs/ideas 里的文件（除了你要生成的结果md外）。
+
+---
+
+根据本项目的源代码，请您利用 research-idea (完整流程）为本项目量身定制一个切实可行、有创新性的课题方向。最后的结果保存为 docs/ideas/v16.md。注意：全程不能查看 docs/ideas 里的文件（除了你要生成的结果md外）。
+
+---
+
+根据本项目的源代码，请您利用 research-idea (完整流程）为本项目量身定制一个切实可行、有创新性的课题方向。最后的结果保存为 docs/ideas/v15.md。注意：全程不能查看 docs/ideas 里的文件（除了你要生成的结果md外）。
+
+---
+
+根据本项目的源代码，请您利用 research-idea (完整流程）为本项目量身定制一个切实可行、有创新性的课题方向。最后的结果保存为 docs/ideas/v13.md。注意：全程不能查看 docs/ideas 里的文件（除了你要生成的结果md外）。
+
+---
+
+根据本项目的源代码，请您利用 research-idea (完整流程）为本项目量身定制一个切实可行、有创新性的课题方向。最后的结果保存为 docs/ideas/v12.md。注意：全程不能查看 docs/ideas 里的文件（除了你要生成的结果md外）。
+
+---
+
+根据 docs/ideas 和 本项目的源代码，我需要你为 bac 项目的科研方向点明方向。你可以利用 [$research-idea](/Volumes/2T01/Cache/.codex/skills/research-idea/SKILL.md) 。 最后的结果保存为 docs/ideas 里的 v9 版本。
+
+---
+
 您对于 docs/ideas/BAC_科研战略_v6_精炼版.md 里提到的关于本项目（bac）科研方向有什么看法？如果值得做，为什么？如果不值得做，你觉得什么值得做？
 
 ---
