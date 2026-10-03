@@ -1,0 +1,16 @@
+node_modules/**
+src/**
+test/**
+scripts/**
+tsconfig.json
+package-lock.json
+dist/test/**
+dist/*.vsix
+.vscode-test/**
+.gitignore
+.DS_Store
+**/.DS_Store
+.env
+.env.*
+credentials/**
+secrets/**

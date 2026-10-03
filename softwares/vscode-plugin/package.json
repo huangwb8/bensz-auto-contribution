@@ -1,0 +1,44 @@
+{
+  "name": "bac-viewer",
+  "displayName": "BAC 贡献账本",
+  "description": "查看 BAC 贡献时间线、Git 账本变化及关联代码差异。",
+  "version": "0.1.0",
+  "publisher": "bensz",
+  "license": "MIT",
+  "engines": { "vscode": "^1.90.0" },
+  "categories": ["Other", "SCM Providers"],
+  "keywords": ["bac", "audit", "contribution", "git"],
+  "repository": { "type": "git", "url": "https://github.com/huangwb8/bensz-auto-contribution", "directory": "softwares/vscode-plugin" },
+  "main": "./dist/extension.js",
+  "extensionKind": ["workspace"],
+  "capabilities": { "untrustedWorkspaces": { "supported": "limited", "description": "可查看本地账本；Git、代码跳转和验证需要可信工作区。" }, "virtualWorkspaces": false },
+  "activationEvents": ["onCustomEditor:bac.viewer"],
+  "contributes": {
+    "customEditors": [{ "viewType": "bac.viewer", "displayName": "BAC 贡献账本", "selector": [{ "filenamePattern": "*.bac" }], "priority": "default" }],
+    "commands": [
+      { "command": "bacViewer.open", "title": "BAC: 打开贡献账本", "icon": "$(book)" },
+      { "command": "bacViewer.compare", "title": "BAC: 与 HEAD 比较账本", "icon": "$(git-compare)" },
+      { "command": "bacViewer.verify", "title": "BAC: 验证账本", "icon": "$(verified)" }
+    ],
+    "menus": {
+      "explorer/context": [{ "command": "bacViewer.open", "when": "resourceExtname == .bac", "group": "navigation" }, { "command": "bacViewer.compare", "when": "resourceExtname == .bac", "group": "navigation" }],
+      "editor/title": [{ "command": "bacViewer.compare", "when": "activeCustomEditorId == bac.viewer", "group": "navigation" }, { "command": "bacViewer.verify", "when": "activeCustomEditorId == bac.viewer", "group": "navigation" }],
+      "scm/resourceState/context": [{ "command": "bacViewer.compare", "when": "resourceExtname == .bac", "group": "navigation" }]
+    },
+    "configuration": {
+      "title": "BAC 贡献账本",
+      "properties": {
+        "bacViewer.bacExecutable": { "type": "string", "default": "bac", "scope": "machine", "description": "BAC 可执行文件路径。默认从 PATH 或 ~/.local/bin 查找；仅用于完整验证，不影响查看与 Git 比较。", "restricted": true }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc --noEmit && node scripts/build.mjs",
+    "test": "npm run compile && node --test dist/test/core.test.js",
+    "test:vscode": "npm run compile && node scripts/test-vscode.mjs",
+    "package": "vsce package --no-dependencies --out dist/",
+    "vscode:prepublish": "npm run compile"
+  },
+  "dependencies": { "yauzl": "^3.2.0" },
+  "devDependencies": { "@types/node": "^22.0.0", "@types/vscode": "^1.90.0", "@types/yauzl": "^2.10.3", "@vscode/test-electron": "^2.5.2", "@vscode/vsce": "^3.6.0", "esbuild": "^0.25.0", "playwright": "^1.55.0", "typescript": "^5.9.0" }
+}

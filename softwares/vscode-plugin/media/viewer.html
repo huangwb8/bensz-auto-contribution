@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{cspSource}}; script-src 'nonce-{{nonce}}';">
+  <link rel="stylesheet" href="{{styleUri}}">
+  <title>BAC 贡献账本</title>
+</head>
+<body>
+  <header class="masthead">
+    <div class="brand"><span class="brand-mark">BAC</span><div><h1>贡献账本</h1><p id="filename">正在读取…</p></div></div>
+    <div class="actions"><button id="refresh">刷新</button><button id="verify" class="primary">验证账本</button></div>
+  </header>
+  <section class="statusbar" aria-label="账本状态"><span id="count">— 条记录</span><span id="validation" class="validation">未验证</span><span id="head" class="mono"></span></section>
+  <div id="notice" role="status" hidden></div>
+  <details id="verification" hidden><summary>验证详情</summary><div id="verification-content"></div></details>
+  <nav class="tabs" aria-label="查看方式"><button id="timeline-tab" class="tab active">贡献时间线</button><button id="changes-tab" class="tab">Git 变化</button><span class="tabs-note">过程记录 · 来源与证据</span></nav>
+  <section id="git-controls" hidden>
+    <label for="baseline">比较范围</label><select id="baseline"><option value="head-worktree">HEAD → 工作区</option><option value="head-index">HEAD → 暂存区</option><option value="index-worktree">暂存区 → 工作区</option></select><button id="compare" class="primary">比较账本</button><span id="compare-summary">选择范围后查看事件变化</span>
+  </section>
+  <main class="workspace">
+    <aside class="browser" aria-label="贡献记录列表">
+      <div class="filters"><label class="sr-only" for="search">搜索记录</label><input id="search" type="search" placeholder="搜索摘要、文件或事件类型…"><div id="sources" class="sources"></div></div>
+      <div id="results-label" class="results-label"></div>
+      <div id="events" class="events" role="list"></div>
+      <button id="more" class="more" hidden>加载更多</button>
+    </aside>
+    <article id="detail" class="detail" aria-label="记录详情"><div class="empty"><span class="empty-mark">BAC</span><h2>读取贡献过程</h2><p>从左侧选择一条记录，查看来源、关联文件和验证证据。</p></div></article>
+  </main>
+  <footer>账本保留协作证据；来源声明不等于身份认证，验证通过也不代表过程完整。</footer>
+  <script nonce="{{nonce}}" src="{{scriptUri}}"></script>
+</body>
+</html>
