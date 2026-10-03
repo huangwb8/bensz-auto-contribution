@@ -180,6 +180,10 @@ The reader should therefore treat a `.bac` file as **verifiable evidence with st
 
 **What if verification fails?** Read the report first. If the problem is a mechanically stale tail, `bac repair stale-tail` can produce a constrained dry-run plan; it will refuse content or attribution rewrites.
 
+## VS Code viewer
+
+Open a `.bac` file in VS Code to browse the contribution timeline, filter the four sources, compare ledger events across HEAD, index and working tree, and open associated code diffs. Full verification reuses the BAC CLI; viewing and Git comparison do not require Python. Source and installation instructions: [softwares/vscode-plugin](softwares/vscode-plugin/README.md).
+
 ## Development
 
 ```bash
@@ -199,6 +203,7 @@ src/bac/       CLI, event model, storage, verification, anchors, reports
 tests/         client and end-to-end tests
 server/        optional reference anchor server
 docs/          BAC tutorial, release guides, and plans
+softwares/vscode-plugin/  VS Code BAC viewer, UI, tests, and build configuration
 ```
 
 ## Contributing

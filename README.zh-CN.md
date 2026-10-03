@@ -180,6 +180,10 @@ BAC 能发现事件内容被编辑、事件缺失或重排、重复 ZIP 成员�
 
 **验证失败怎么办？** 先阅读验证报告。如果只是机械性尾部分叉，可用 `bac repair stale-tail` 生成受限的 dry-run 计划；涉及内容或归因重写时，命令会拒绝执行。
 
+## VS Code 查看器
+
+在 VS Code 中点击 `.bac`，可阅读贡献时间线、筛选四类来源、比较 HEAD／暂存区／工作区账本变化，并跳转到关联代码 diff。完整验证复用 BAC CLI，查看与 Git 比较无需 Python。插件源码和安装说明见 [softwares/vscode-plugin](softwares/vscode-plugin/README.md)。
+
 ## 开发与测试
 
 ```bash
@@ -199,6 +203,7 @@ src/bac/       CLI、事件模型、存储、验证、锚定、报告
 tests/         客户端与端到端测试
 server/        可选的 reference anchor server
 docs/          BAC 教程、发布指南和计划
+softwares/vscode-plugin/  VS Code BAC 查看器、界面、测试和构建配置
 ```
 
 ## 参与贡献
