@@ -9,6 +9,7 @@ export async function run(): Promise<void> {
   const root = process.env.BAC_TEST_ROOT;
   const output = process.env.BAC_TEST_OUTPUT;
   if (!root || !output) throw new Error('Missing test environment.');
+  assert.equal(vscode.workspace.getConfiguration('bacViewer').get('language'), 'en');
   const uri = vscode.Uri.file(path.join(root, 'docs', 'contribution.bac'));
   await vscode.commands.executeCommand('workbench.action.closeAllEditors');
   await vscode.commands.executeCommand('workbench.action.closePanel');
@@ -21,6 +22,13 @@ export async function run(): Promise<void> {
   await vscode.commands.executeCommand('vscode.openWith', uri, 'bac.viewer');
   assert.ok(vscode.window.tabGroups.all.some(group => group.tabs.some(tab => tab.input instanceof vscode.TabInputCustom && tab.input.viewType === 'bac.viewer')));
   await writeFile(path.join(output, 'viewer-ready'), 'ready');
+  await waitFor(path.join(output, 'language-selected'));
+  assert.equal(vscode.workspace.getConfiguration('bacViewer').get('language'), 'zh-CN');
+  await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+  await vscode.commands.executeCommand('vscode.openWith', uri, 'bac.viewer');
+  await writeFile(path.join(output, 'language-reopened'), 'ready');
+  await waitFor(path.join(output, 'language-restored'));
+  assert.equal(vscode.workspace.getConfiguration('bacViewer').get('language'), 'en');
   await waitFor(path.join(output, 'ui-done'));
   const commands = await vscode.commands.getCommands();
   for (const command of ['bacViewer.open', 'bacViewer.compare', 'bacViewer.verify']) assert.ok(commands.includes(command));
@@ -41,7 +49,7 @@ export async function run(): Promise<void> {
   let failed = false;
   try { await access(path.join(output, 'ui-failed')); failed = true; } catch { /* No UI failure marker. */ }
   assert.equal(failed, false, 'UI automation reported a failure.');
-  await writeFile(path.join(output, 'integration-result.json'), JSON.stringify({ status: 'pass', customEditor: true, commands: true, verificationFailure: true, safeText: true, refreshInvalidatesVerification: true }));
+  await writeFile(path.join(output, 'integration-result.json'), JSON.stringify({ status: 'pass', customEditor: true, languageSwitchAndPersistence: true, commands: true, verificationFailure: true, safeText: true, refreshInvalidatesVerification: true }));
 }
 
 async function waitFor(file: string): Promise<void> {

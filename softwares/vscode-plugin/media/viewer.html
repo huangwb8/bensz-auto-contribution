@@ -1,34 +1,35 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="{{language}}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{cspSource}}; script-src 'nonce-{{nonce}}';">
   <link rel="stylesheet" href="{{styleUri}}">
-  <title>BAC 贡献账本</title>
+  <title data-i18n="BAC Contribution Ledger">BAC Contribution Ledger</title>
 </head>
 <body>
   <header class="masthead">
-    <div class="brand"><span class="brand-mark">BAC</span><div><h1>贡献账本</h1><p id="filename">正在读取…</p></div></div>
-    <div class="actions"><button id="refresh">刷新</button><button id="verify" class="primary">验证账本</button></div>
+    <div class="brand"><span class="brand-mark">BAC</span><div><h1 data-i18n="Contribution ledger">Contribution ledger</h1><p id="filename" data-i18n="Loading…">Loading…</p></div></div>
+    <div class="actions"><label class="sr-only" for="language" data-i18n="Interface language">Interface language</label><select id="language" aria-label="Interface language" data-i18n-aria-label="Interface language"><option value="en">English</option><option value="zh-CN">简体中文</option></select><button id="refresh" data-i18n="Refresh">Refresh</button><button id="verify" class="primary" data-i18n="Verify ledger">Verify ledger</button></div>
   </header>
-  <section class="statusbar" aria-label="账本状态"><span id="count">— 条记录</span><span id="validation" class="validation">未验证</span><span id="head" class="mono"></span></section>
+  <section class="statusbar" aria-label="Ledger status" data-i18n-aria-label="Ledger status"><span id="count" data-i18n="— events">— events</span><span id="validation" class="validation" data-i18n="Not verified">Not verified</span><span id="head" class="mono"></span></section>
   <div id="notice" role="status" hidden></div>
-  <details id="verification" hidden><summary>验证详情</summary><div id="verification-content"></div></details>
-  <nav class="tabs" aria-label="查看方式"><button id="timeline-tab" class="tab active">贡献时间线</button><button id="changes-tab" class="tab">Git 变化</button><span class="tabs-note">过程记录 · 来源与证据</span></nav>
+  <details id="verification" hidden><summary data-i18n="Verification details">Verification details</summary><div id="verification-content"></div></details>
+  <nav class="tabs" aria-label="View mode" data-i18n-aria-label="View mode"><button id="timeline-tab" class="tab active" data-i18n="Contribution timeline">Contribution timeline</button><button id="changes-tab" class="tab" data-i18n="Git changes">Git changes</button><span class="tabs-note" data-i18n="Process record · Sources and evidence">Process record · Sources and evidence</span></nav>
   <section id="git-controls" hidden>
-    <label for="baseline">比较范围</label><select id="baseline"><option value="head-worktree">HEAD → 工作区</option><option value="head-index">HEAD → 暂存区</option><option value="index-worktree">暂存区 → 工作区</option></select><button id="compare" class="primary">比较账本</button><span id="compare-summary">选择范围后查看事件变化</span>
+    <label for="baseline" data-i18n="Comparison range">Comparison range</label><select id="baseline"><option value="head-worktree" data-i18n="HEAD → Working tree">HEAD → Working tree</option><option value="head-index" data-i18n="HEAD → Index">HEAD → Index</option><option value="index-worktree" data-i18n="Index → Working tree">Index → Working tree</option></select><button id="compare" class="primary" data-i18n="Compare ledger">Compare ledger</button><span id="compare-summary" data-i18n="Select a range to view event changes">Select a range to view event changes</span>
   </section>
   <main class="workspace">
-    <aside class="browser" aria-label="贡献记录列表">
-      <div class="filters"><label class="sr-only" for="search">搜索记录</label><input id="search" type="search" placeholder="搜索摘要、文件或事件类型…"><div id="sources" class="sources"></div></div>
+    <aside class="browser" aria-label="Contribution event list" data-i18n-aria-label="Contribution event list">
+      <div class="filters"><label class="sr-only" for="search" data-i18n="Search events">Search events</label><input id="search" type="search" placeholder="Search summaries, files or event types…" data-i18n-placeholder="Search summaries, files or event types…"><div id="sources" class="sources"></div></div>
       <div id="results-label" class="results-label"></div>
       <div id="events" class="events" role="list"></div>
-      <button id="more" class="more" hidden>加载更多</button>
+      <button id="more" class="more" hidden data-i18n="Load more">Load more</button>
     </aside>
-    <article id="detail" class="detail" aria-label="记录详情"><div class="empty"><span class="empty-mark">BAC</span><h2>读取贡献过程</h2><p>从左侧选择一条记录，查看来源、关联文件和验证证据。</p></div></article>
+    <article id="detail" class="detail" aria-label="Event details" data-i18n-aria-label="Event details"><div class="empty"><span class="empty-mark">BAC</span><h2 data-i18n="Explore the contribution history">Explore the contribution history</h2><p data-i18n="Select an event on the left to inspect its source, related files and verification evidence.">Select an event on the left to inspect its source, related files and verification evidence.</p></div></article>
   </main>
-  <footer>账本保留协作证据；来源声明不等于身份认证，验证通过也不代表过程完整。</footer>
+  <footer data-i18n="The ledger preserves collaboration evidence. Source claims do not authenticate identities, and verification does not prove a complete history.">The ledger preserves collaboration evidence. Source claims do not authenticate identities, and verification does not prove a complete history.</footer>
+  <script nonce="{{nonce}}" src="{{i18nUri}}"></script>
   <script nonce="{{nonce}}" src="{{scriptUri}}"></script>
 </body>
 </html>

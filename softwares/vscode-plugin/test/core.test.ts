@@ -1,3 +1,4 @@
+import { t, setLanguage, getLanguage } from '../src/i18n';
 import { test } from 'node:test';
 import * as assert from 'node:assert/strict';
 import { mkdtemp, mkdir, symlink, rm, readFile } from 'node:fs/promises';
@@ -21,17 +22,17 @@ test('reads the real project ledger', async () => {
 test('rejects malformed, duplicate, traversing, invalid UTF-8 and oversized containers', async () => {
   await assert.rejects(readLedger(Buffer.from('not a ZIP')));
   const list = entries();
-  await assert.rejects(readLedger(zip([...list, list[1]])), /重复/);
-  await assert.rejects(readLedger(zip([...list, ['../escape.json', '{}']])), /invalid relative path|不支持/);
+  await assert.rejects(readLedger(zip([...list, list[1]])), /duplicate/);
+  await assert.rejects(readLedger(zip([...list, ['../escape.json', '{}']])), /invalid relative path|unsupported/);
   await assert.rejects(readLedger(zip([list[0], [list[1][0], Buffer.from([0xff])]])), /UTF-8/);
   await assert.rejects(readLedger(Buffer.alloc(MAX_BAC_BYTES + 1)), /50 MiB/);
-  await assert.rejects(readLedger(zip([list[0], [list[1][0], ' '.repeat(2 * 1024 * 1024 + 1)]])), /解压大小/);
+  await assert.rejects(readLedger(zip([list[0], [list[1][0], ' '.repeat(2 * 1024 * 1024 + 1)]])), /decompress/);
 });
 test('rejects unsupported schema, duplicate IDs and sequence gaps', async () => {
-  await assert.rejects(readLedger(zip([entries()[0], ['events/000000000002.json', JSON.stringify(event())]])), /编号不连续/);
-  await assert.rejects(readLedger(zip(entries([event(), event()]))), /event_id 重复/);
+  await assert.rejects(readLedger(zip([entries()[0], ['events/000000000002.json', JSON.stringify(event())]])), /not contiguous/);
+  await assert.rejects(readLedger(zip(entries([event(), event()]))), /Duplicate ledger event_id/);
   const invalid = event(); invalid.source_type = 'unknown' as typeof invalid.source_type;
-  await assert.rejects(readLedger(zip(entries([invalid]))), /结构不受支持/);
+  await assert.rejects(readLedger(zip(entries([invalid]))), /unsupported event structure/);
 });
 test('detects appended events, changed content despite identical claimed hash and deletion', async () => {
   const before = await readLedger(zip(entries()));
@@ -69,4 +70,19 @@ test('confines file navigation, including deleted targets behind an escaping sym
     assert.equal(await safeProjectPath(root, 'src/new.ts'), path.join(root, 'src/new.ts'));
     for (const target of ['../outside', '/etc/passwd', 'C:\\Windows\\file', 'src\\file', 'escape/missing.ts']) await assert.rejects(safeProjectPath(root, target));
   } finally { await rm(root, { recursive: true, force: true }); await rm(outside, { recursive: true, force: true }); }
+});
+
+test('defaults to English, supports explicit Chinese and keeps inserted evidence literal', async () => {
+  assert.equal(getLanguage(), 'en');
+  assert.equal(t('Verify ledger'), 'Verify ledger');
+  setLanguage('zh-CN');
+  try {
+    assert.equal(t('Verify ledger'), '验证账本');
+    assert.equal(t('Error: {0}', '$& {1} 原始证据'), '错误：$& {1} 原始证据');
+    assert.equal(t('Unknown verifier message'), 'Unknown verifier message');
+    await assert.rejects(readLedger(Buffer.alloc(MAX_BAC_BYTES + 1)), /账本超过/);
+  } finally { setLanguage('en'); }
+  setLanguage('unexpected-locale');
+  assert.equal(getLanguage(), 'en');
+  await assert.rejects(readLedger(Buffer.alloc(MAX_BAC_BYTES + 1)), /ledger exceeds/);
 });

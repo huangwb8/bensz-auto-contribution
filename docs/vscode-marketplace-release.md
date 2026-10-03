@@ -4,23 +4,21 @@
 
 插件源码和包配置位于 `softwares/vscode-plugin`。版本以该目录的 `package.json` 为准，与根目录 Python 包版本独立。用户指定发布版本时先同步插件版本；未指定时使用现有版本，不自动升级。
 
-当前发布版本为 `0.1.0`，发布者 ID 为 `bensz`，插件 ID 为 `bensz.bac-viewer`。2026-10-03 用户已通过 Marketplace 网页上传 VSIX，管理页截图显示 `Public` 与 `Verifying 0.1.0`；随后公开页面返回 HTTP 404，公开查询尚未返回已验证版本。因此当前确认的是上传提交成功，上架和下载仍待平台验证。发布者必须由账号实际拥有或授予发布权限；仅设置 `publisher` 字段不能取得该身份。发布结果以 Marketplace 为准。
+本次目标版本为 `0.1.1`，发布者 ID 为 `bensz`，插件 ID 为 `bensz.bac-viewer`。版本与发布状态分别核对；本地打包不代表已经上传或公开上架。
+
+## 默认发布流程
+
+按根目录 `AGENTS.md`：AI 完成本地检查与打包 → 人类在官方 Marketplace 网页手动上传 → 确认提交成功后在本机安装同一 VSIX → 核对商店公开版本。
+
+提交上传、本机安装与商店公开可用是不同状态，应分别报告。平台仍在验证时，确认上传提交成功即可先在本机安装该 VSIX；不能因此声称新版本已公开上架。
 
 ## 账号与凭据
 
-- 使用 Microsoft 账号登录 [Marketplace 发布管理页](https://marketplace.visualstudio.com/manage)，创建发布者或确认现有发布权限。
-- 微软当前要求新建 Azure DevOps 组织时关联有效 Azure 订阅；账号需对该订阅具有 Owner 或 Contributor 权限。已有组织及免费额度不受此新增要求影响。没有订阅时先按 Azure 页面完成订阅注册，再回到组织创建页选择订阅；组织托管区域不决定插件面向哪些国家发布。订阅费用与所选方案、实际使用量有关，开通时核对条款。参见 [创建组织](https://learn.microsoft.com/en-us/azure/devops/organizations/accounts/create-organization?view=azure-devops)。
-- 在同一账号下的 Azure DevOps 创建 Personal Access Token（PAT）。Organization 选择 **All accessible organizations**；Scopes 选择 **Custom defined → Show all scopes → Marketplace → Manage**，设置合适的有效期。
-- PAT 仅用于发布身份验证，不写入 Git、文档、BAC 账本或 VSIX，不在命令参数或输出中显示。可通过 `vsce login` 输入，或仅向发布进程注入 `VSCE_PAT`。
-- 本次协作可使用仓库外的本机文件 `~/.config/bac-marketplace/pat`，文件权限设为 `600`；发布完成后可由用户删除文件并撤销短期 PAT。
-
-完整步骤以微软的 [官方发布指南](https://code.visualstudio.com/api/working-with-extensions/publishing-extension) 为准。
-
-微软宣布全球 PAT 于 **2026-12-01** 退役。当前 PAT 路线适用于这次发布；后续自动发布需要迁移到 Microsoft Entra ID，官方推荐工作负载身份联合与托管身份。本文的 `vsce login` 示例不能视为该日期之后的长期认证方案。网页上传 VSIX 也可完成发布，无需为了网页上传创建 DevOps 组织或 PAT。
+人类使用拥有 `bensz` 发布权限的 Microsoft 账号登录 [Marketplace 发布管理页](https://marketplace.visualstudio.com/manage)，完成验证码、MFA 和上传。AI 提供 VSIX 路径、版本与 SHA-256，不接管浏览器登录会话。密码、Cookie、登录状态和其它凭据不写入 Git、文档、BAC、VSIX 或发布证据。
 
 ## 本地检查
 
-在项目根目录执行：
+使用 Node.js 22.12+（或受支持的更新版本），在项目根目录执行：
 
 ```bash
 cd softwares/vscode-plugin
@@ -37,17 +35,25 @@ npm run package
 
 ## 上传已检查的 VSIX
 
-以下示例使用当前版本和发布者；身份或版本变化时同步调整：
+1. 人类打开官方管理页，确认当前账号拥有目标发布者权限。
+2. 选择 `bensz` 发布者与 `bac-viewer` 插件，在更多操作中选择 **Update**；首次发布使用创建扩展入口。
+3. 选择 AI 提供的 `dist/bac-viewer-<插件版本>.vsix`，核对插件 ID 与目标版本，再点击 **Upload**。
+4. 检查网页成功／失败响应及管理页实际版本与处理状态，将结果告知 AI；仅点击按钮或页面跳转不能作为上传成功证据。
+5. 若目标版本已存在，先核对远端内容与本地包，不删除已有版本或自行递增版本；上传失败先处理错误。
+
+## 本机安装最新版本
+
+用户确认上传提交成功或提供相应证据后，在插件目录直接安装本次上传的同一 VSIX：
 
 ```bash
-npx vsce login bensz
-npx vsce verify-pat bensz
-npx vsce publish --packagePath dist/bac-viewer-0.1.0.vsix
+VERSION=$(node -p "require('./package.json').version")
+code --install-extension "dist/bac-viewer-${VERSION}.vsix" --force
+code --list-extensions --show-versions
 ```
 
-上传直接使用已检查的文件，不重新生成包，不自动创建 Git 提交或 tag。`verify-pat` 是身份访问检查，实际发布仍要求发布者具备写权限。不要用跳过重复版本选项把“已有版本”误报为本次发布成功。
+检查安装命令成功退出，并确认列表中的 `bensz.bac-viewer@<插件版本>` 与上传版本一致。若 `code` 不在 PATH，使用本机 VS Code 的 CLI 可执行文件路径。必要时执行 **Developer: Reload Window** 加载新版本。
 
-若目标版本已经存在，先检查远端内容与本地包，不删除商店版本或自行递增版本。上传失败时核对凭据、发布者和权限，再按实际错误处理。
+使用本次上传的本地包，可以在 Marketplace 尚未完成验证时安装最新版本；从商店按插件 ID 安装可能仍获得旧版本。
 
 ## 发布后验证
 
@@ -63,8 +69,8 @@ Marketplace 处理上传可能需要几分钟。只有在商店能查到正确 I
 code --install-extension bensz.bac-viewer
 ```
 
-发布证据应记录插件 ID、版本、VSIX SHA-256、上传结果和远端查询结果。BAC 中分别记录 human 的发布请求、ai 的准备工作、tool 的检查／上传结果；未经观察的结果不能写为成功，平台状态只在取得实际响应后记录。
+发布证据应记录插件 ID、版本、VSIX SHA-256、上传结果、本机安装命令与实际安装版本，以及远端查询结果。BAC 中分别记录 human 的发布规则或请求、ai 的准备工作、tool 的检查／安装／公开查询结果；人类上传反馈保留为 human 来源；未经观察的结果不能写为成功，平台状态只在取得实际响应后记录。
 
 ## 支持范围
 
-当前插件支持桌面 VS Code 1.90+ 与远程 Node 扩展宿主，不支持浏览器版 `vscode.dev`。界面当前为简体中文。查看与 Git 比较不依赖 Python；完整验证需在扩展宿主所在环境安装 BAC CLI。插件只读账本，BAC 是 tamper-evident 的辅助过程记录，不能单独证明身份或最终署名。
+当前插件支持桌面 VS Code 1.90+ 与远程 Node 扩展宿主，不支持浏览器版 `vscode.dev`。界面默认英文，用户可通过面板语言菜单或 `bacViewer.language=zh-CN` 主动选择简体中文；扩展名称和命令入口保持英文，README 提供英文主文档及中文版链接。查看与 Git 比较不依赖 Python；完整验证需在扩展宿主所在环境安装 BAC CLI。插件只读账本，BAC 是 tamper-evident 的辅助过程记录，不能单独证明身份或最终署名。

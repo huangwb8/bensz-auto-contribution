@@ -1,34 +1,129 @@
 {
   "name": "bac-viewer",
-  "displayName": "BAC 贡献账本",
-  "description": "查看 BAC 贡献时间线、Git 账本变化及关联代码差异。",
-  "version": "0.1.0",
+  "displayName": "BAC Contribution Ledger",
+  "description": "Explore BAC contribution timelines, Git ledger changes and related code diffs.",
+  "version": "0.1.1",
   "publisher": "bensz",
   "license": "MIT",
-  "engines": { "vscode": "^1.90.0" },
-  "categories": ["Other", "SCM Providers"],
-  "keywords": ["bac", "audit", "contribution", "git"],
-  "repository": { "type": "git", "url": "https://github.com/huangwb8/bensz-auto-contribution", "directory": "softwares/vscode-plugin" },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other",
+    "SCM Providers"
+  ],
+  "keywords": [
+    "bac",
+    "audit",
+    "contribution",
+    "git"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/huangwb8/bensz-auto-contribution",
+    "directory": "softwares/vscode-plugin"
+  },
   "main": "./dist/extension.js",
-  "extensionKind": ["workspace"],
-  "capabilities": { "untrustedWorkspaces": { "supported": "limited", "description": "可查看本地账本；Git、代码跳转和验证需要可信工作区。" }, "virtualWorkspaces": false },
-  "activationEvents": ["onCustomEditor:bac.viewer"],
+  "extensionKind": [
+    "workspace"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Local ledgers can be viewed. Git, file navigation and verification require a trusted workspace."
+    },
+    "virtualWorkspaces": false
+  },
+  "activationEvents": [
+    "onCustomEditor:bac.viewer"
+  ],
   "contributes": {
-    "customEditors": [{ "viewType": "bac.viewer", "displayName": "BAC 贡献账本", "selector": [{ "filenamePattern": "*.bac" }], "priority": "default" }],
+    "customEditors": [
+      {
+        "viewType": "bac.viewer",
+        "displayName": "BAC Contribution Ledger",
+        "selector": [
+          {
+            "filenamePattern": "*.bac"
+          }
+        ],
+        "priority": "default"
+      }
+    ],
     "commands": [
-      { "command": "bacViewer.open", "title": "BAC: 打开贡献账本", "icon": "$(book)" },
-      { "command": "bacViewer.compare", "title": "BAC: 与 HEAD 比较账本", "icon": "$(git-compare)" },
-      { "command": "bacViewer.verify", "title": "BAC: 验证账本", "icon": "$(verified)" }
+      {
+        "command": "bacViewer.open",
+        "title": "BAC: Open Contribution Ledger",
+        "icon": "$(book)"
+      },
+      {
+        "command": "bacViewer.compare",
+        "title": "BAC: Compare Ledger with HEAD",
+        "icon": "$(git-compare)"
+      },
+      {
+        "command": "bacViewer.verify",
+        "title": "BAC: Verify Ledger",
+        "icon": "$(verified)"
+      }
     ],
     "menus": {
-      "explorer/context": [{ "command": "bacViewer.open", "when": "resourceExtname == .bac", "group": "navigation" }, { "command": "bacViewer.compare", "when": "resourceExtname == .bac", "group": "navigation" }],
-      "editor/title": [{ "command": "bacViewer.compare", "when": "activeCustomEditorId == bac.viewer", "group": "navigation" }, { "command": "bacViewer.verify", "when": "activeCustomEditorId == bac.viewer", "group": "navigation" }],
-      "scm/resourceState/context": [{ "command": "bacViewer.compare", "when": "resourceExtname == .bac", "group": "navigation" }]
+      "explorer/context": [
+        {
+          "command": "bacViewer.open",
+          "when": "resourceExtname == .bac",
+          "group": "navigation"
+        },
+        {
+          "command": "bacViewer.compare",
+          "when": "resourceExtname == .bac",
+          "group": "navigation"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "bacViewer.compare",
+          "when": "activeCustomEditorId == bac.viewer",
+          "group": "navigation"
+        },
+        {
+          "command": "bacViewer.verify",
+          "when": "activeCustomEditorId == bac.viewer",
+          "group": "navigation"
+        }
+      ],
+      "scm/resourceState/context": [
+        {
+          "command": "bacViewer.compare",
+          "when": "resourceExtname == .bac",
+          "group": "navigation"
+        }
+      ]
     },
     "configuration": {
-      "title": "BAC 贡献账本",
+      "title": "BAC Contribution Ledger",
       "properties": {
-        "bacViewer.bacExecutable": { "type": "string", "default": "bac", "scope": "machine", "description": "BAC 可执行文件路径。默认从 PATH 或 ~/.local/bin 查找；仅用于完整验证，不影响查看与 Git 比较。", "restricted": true }
+        "bacViewer.language": {
+          "type": "string",
+          "enum": [
+            "en",
+            "zh-CN"
+          ],
+          "enumDescriptions": [
+            "English (default)",
+            "简体中文（主动选择）"
+          ],
+          "default": "en",
+          "scope": "application",
+          "description": "Viewer language. Defaults to English regardless of the VS Code display language. Select Simplified Chinese here or in the viewer language menu."
+        },
+        "bacViewer.bacExecutable": {
+          "type": "string",
+          "default": "bac",
+          "scope": "machine",
+          "description": "Path to the BAC executable. Looked up in PATH or ~/.local/bin by default. Only required for full verification; viewing and Git comparison work without it.",
+          "restricted": true
+        }
       }
     }
   },
@@ -39,6 +134,17 @@
     "package": "vsce package --no-dependencies --out dist/",
     "vscode:prepublish": "npm run compile"
   },
-  "dependencies": { "yauzl": "^3.2.0" },
-  "devDependencies": { "@types/node": "^22.0.0", "@types/vscode": "^1.90.0", "@types/yauzl": "^2.10.3", "@vscode/test-electron": "^2.5.2", "@vscode/vsce": "^3.6.0", "esbuild": "^0.25.0", "playwright": "^1.55.0", "typescript": "^5.9.0" }
+  "dependencies": {
+    "yauzl": "^3.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.90.0",
+    "@types/yauzl": "^2.10.3",
+    "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "^4.0.0",
+    "esbuild": "^0.25.0",
+    "playwright": "^1.55.0",
+    "typescript": "^5.9.0"
+  }
 }

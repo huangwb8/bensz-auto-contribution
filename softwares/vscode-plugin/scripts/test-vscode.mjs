@@ -55,42 +55,71 @@ try {
   if (!frame) throw new Error('BAC Webview frame was not found.');
   await frame.locator('.event-row').first().waitFor();
   await page.screenshot({ path: path.join(output, 'after-timeline.jpg'), type: 'jpeg', quality: 85 });
+  if (await frame.locator('html').getAttribute('lang') !== 'en') throw new Error('English is not the default.');
+  await frame.locator('#detail h2').waitFor();
+  const originalSummary = await frame.locator('#detail h2').textContent();
+  await frame.locator('#search').fill('vscode');
+  async function localizedFrame(language) {
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline) {
+      for (const candidate of page.frames()) {
+        if (await candidate.locator('#language').count() && await candidate.locator('html').getAttribute('lang') === language && await candidate.locator('.event-row').count()) return candidate;
+      }
+      await page.waitForTimeout(100);
+    }
+    throw new Error(`Localized viewer not found: ${language}`);
+  }
+  await frame.locator('#language').selectOption('zh-CN');
+  frame = await localizedFrame('zh-CN');
+  await frame.locator('#timeline-tab').filter({ hasText: '贡献时间线' }).waitFor();
+  if (await frame.locator('#search').inputValue() !== 'vscode') throw new Error('Language switch lost the search query.');
+  await frame.locator('#detail h2').filter({ hasText: originalSummary }).waitFor();
+  await page.screenshot({ path: path.join(output, 'after-chinese.jpg'), type: 'jpeg', quality: 85 });
+  await writeFile(path.join(output, 'language-selected'), 'done');
+  await waitFile('language-reopened');
+  frame = await localizedFrame('zh-CN');
+  await frame.locator('#timeline-tab').filter({ hasText: '贡献时间线' }).waitFor();
+  await frame.locator('#language').selectOption('en');
+  frame = await localizedFrame('en');
+  await frame.locator('#timeline-tab').filter({ hasText: 'Contribution timeline' }).waitFor();
+  await frame.locator('#search').fill('');
+  await writeFile(path.join(output, 'language-restored'), 'done');
   const count = await frame.locator('.event-row').count();
   if (!count) throw new Error('No events rendered.');
-  await frame.getByRole('button', { name: /^人类 / }).click();
+  await frame.getByRole('button', { name: /^Human / }).click();
   if (await frame.locator('.event-row:not([data-source="human"])').count()) throw new Error('Source filter failed.');
   await frame.locator('#search').fill('vscode');
   await frame.locator('.event-row').first().click();
   await frame.locator('#detail h2').filter({ hasText: /VS Code|vscode/i }).waitFor();
   await frame.locator('#search').fill('');
-  await frame.getByRole('button', { name: /^全部 / }).click();
+  await frame.getByRole('button', { name: /^All / }).click();
   await frame.locator('#changes-tab').click();
   await frame.locator('#compare').click();
-  await frame.locator('#compare-summary').filter({ hasText: /HEAD → 工作区 · \d+ → \d+ 条/ }).waitFor();
+  await frame.locator('#compare-summary').filter({ hasText: /HEAD → Working tree · \d+ → \d+ events/ }).waitFor();
   await frame.locator('.event-row').first().click();
-  await frame.getByRole('button', { name: '打开事件 JSON 差异' }).waitFor();
+  await frame.getByRole('button', { name: 'Open event JSON diff' }).waitFor();
   await page.screenshot({ path: path.join(output, 'after-git.jpg'), type: 'jpeg', quality: 85 });
-  await frame.getByRole('button', { name: '打开事件 JSON 差异' }).click();
+  await frame.getByRole('button', { name: 'Open event JSON diff' }).click();
   await page.locator('.monaco-diff-editor').first().waitFor();
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+w' : 'Control+w');
   await frame.locator('#baseline').selectOption('head-index');
   await frame.locator('#compare').click();
-  await frame.locator('#compare-summary').filter({ hasText: /HEAD → 暂存区 · \d+ → \d+ 条/ }).waitFor();
+  await frame.locator('#compare-summary').filter({ hasText: /HEAD → Index · \d+ → \d+ events/ }).waitFor();
   await frame.locator('#baseline').selectOption('index-worktree');
   await frame.locator('#compare').click();
-  await frame.locator('#compare-summary').filter({ hasText: /暂存区 → 工作区 · \d+ → \d+ 条/ }).waitFor();
+  await frame.locator('#compare-summary').filter({ hasText: /Index → Working tree · \d+ → \d+ events/ }).waitFor();
   await frame.locator('#verify').click();
-  await frame.locator('#validation').filter({ hasText: /验证通过|验证有警告/ }).waitFor();
+  await frame.locator('#validation').filter({ hasText: /Verification passed|Verification warnings/ }).waitFor();
   await frame.locator('#timeline-tab').click();
   // Exercise native code diff on an existing recorded file without changing the repository.
   await frame.locator('#search').fill('src/');
   const fileRow = frame.locator('.event-row').first();
   await fileRow.click();
-  await frame.getByRole('button', { name: 'HEAD → 工作区', exact: true }).first().waitFor();
+  const codeDiff = frame.locator('.file').filter({ has: frame.locator('div.mono').filter({ hasText: /\.(ts|py|js)$/ }) }).getByRole('button', { name: 'HEAD → Working tree', exact: true }).first();
+  await codeDiff.waitFor();
   await page.screenshot({ path: path.join(output, 'after-files.jpg'), type: 'jpeg', quality: 85 });
-  await frame.getByRole('button', { name: 'HEAD → 工作区', exact: true }).first().click();
-  await page.waitForTimeout(1000);
-  if (!(await page.locator('.monaco-diff-editor').count())) throw new Error('Native code diff did not open.');
+  await codeDiff.click();
+  await page.locator('.monaco-diff-editor').first().waitFor();
   await page.screenshot({ path: path.join(output, 'after-code-diff.jpg'), type: 'jpeg', quality: 85 });
   await writeFile(path.join(output, 'ui-done'), 'done');
   await waitFile('tamper-ready');
@@ -107,11 +136,11 @@ try {
   await frame.locator('#detail h2').filter({ hasText: '篡改测试' }).waitFor();
   if (await frame.locator('img').count()) throw new Error('Event HTML was interpreted.');
   await frame.locator('#verify').click();
-  await frame.locator('#validation').filter({ hasText: '验证失败' }).waitFor();
+  await frame.locator('#validation').filter({ hasText: 'Verification failed' }).waitFor();
   await frame.locator('#verification > summary').click();
   await frame.locator('#verification-content').filter({ hasText: 'event_hash mismatch' }).waitFor();
   await writeFile(path.join(output, 'repair-request'), 'done');
-  await frame.locator('#validation').filter({ hasText: '未验证' }).waitFor({ timeout: 15_000 });
+  await frame.locator('#validation').filter({ hasText: 'Not verified' }).waitFor({ timeout: 15_000 });
   await writeFile(path.join(output, 'tamper-done'), 'done');
   await browser.close(); browser = undefined;
   await running;
@@ -125,6 +154,8 @@ try {
     await browser.close();
   }
   await writeFile(path.join(output, 'baseline-done'), 'done');
+  await writeFile(path.join(output, 'language-selected'), 'done');
+  await writeFile(path.join(output, 'language-restored'), 'done');
   await writeFile(path.join(output, 'ui-done'), 'done');
   await writeFile(path.join(output, 'repair-request'), 'done');
   await writeFile(path.join(output, 'tamper-done'), 'done');

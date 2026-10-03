@@ -113,6 +113,16 @@
 - 默认通过 `.github/workflows/publish-pypi.yml` 和 PyPI Trusted Publishing 发布，不在仓库中保存 PyPI token
 - 发布流程说明维护在 `docs/pypi-release.md`；改变发布策略时同步更新 README、CHANGELOG 和该文档
 
+## VS Code 插件发布与本机更新
+
+- 插件新版本先完成本地测试、VSIX 打包与包内容检查，再由人类通过官方 Marketplace 网页手动上传；AI 提供已检查的 VSIX 路径及发布说明
+- 插件版本以 `softwares/vscode-plugin/package.json` 为唯一来源，与 Python 包版本独立；用户指定版本时严格使用该版本，不自行递增或覆盖商店已有版本
+- 上传入口为 `https://marketplace.visualstudio.com/manage`；人类使用具有目标发布者权限的 Microsoft 账号完成登录、上传和提交
+- 上传前执行 `npm ci`、`npm test`、`npm run package`，核对 VSIX 的发布者、插件 ID、目标版本与内容；插件构建脚本及相关测试只放在 `softwares/vscode-plugin` 及子目录
+- 用户确认上传提交成功或提供相应证据后，使用 `code --install-extension <本次上传的 VSIX 路径> --force` 在本机安装同一已检查的包，并通过 `code --list-extensions --show-versions` 核对插件 ID 与版本；本机安装作为持续授权，无需逐次请求确认
+- 后续核对官方商店的公开版本；分别记录人类上传提交、平台验证／公开可用、本机安装状态，以及 VSIX SHA-256 和验证证据，不把上传成功等同于已经上架
+- 不把密码、Cookie、登录状态或其它凭据写入 Git、文档、BAC 或 VSIX；操作说明维护在 `docs/vscode-marketplace-release.md`，变更同步记录到 `CHANGELOG.md` 与 BAC
+
 ## Codex CLI 特定说明
 
 ### 文件与输出

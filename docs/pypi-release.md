@@ -55,6 +55,14 @@ python -m twine upload dist/*
 
 `twine upload` 默认读取 `~/.pypirc`、keyring 或 `TWINE_USERNAME`/`TWINE_PASSWORD` 等本地配置。不要把 PyPI token 写入仓库、命令历史或发布文档。
 
+同一版本还要创建 GitHub Release 时，先确认 `publish-pypi.yml` 的原始启用状态；若处于启用状态，在创建 Release 前临时停用，Release 创建后恢复，避免 `release.published` 再次触发 PyPI 发布。原本停用的工作流保持停用。停用或恢复失败必须报告实际状态。
+
+```bash
+gh workflow disable publish-pypi.yml
+# 从本地上传构建产物，创建本版本 GitHub Release
+gh workflow enable publish-pypi.yml
+```
+
 ## 手动触发
 
 工作流也支持 `workflow_dispatch` 手动触发。仅在 `pypi` environment 已启用审批保护时使用，因为它会把当前 `pyproject.toml` 版本发布到 PyPI。
