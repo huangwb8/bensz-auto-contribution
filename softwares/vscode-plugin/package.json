@@ -2,7 +2,7 @@
   "name": "bac-viewer",
   "displayName": "BAC Contribution Ledger",
   "description": "Explore BAC contribution timelines, Git ledger changes and related code diffs.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "bensz",
   "license": "MIT",
   "engines": {
@@ -130,8 +130,8 @@
   "scripts": {
     "compile": "tsc --noEmit && node scripts/build.mjs",
     "test": "npm run compile && node --test dist/test/core.test.js",
-    "test:vscode": "npm run compile && node scripts/test-vscode.mjs",
-    "package": "vsce package --no-dependencies --out dist/",
+    "test:vscode": "npm run compile && node scripts/test-vscode.mjs && node scripts/test-scm.mjs && node scripts/test-scm.mjs --untrusted",
+    "package": "vsce package --no-dependencies --baseContentUrl https://github.com/huangwb8/bensz-auto-contribution/blob/main/softwares/vscode-plugin --out dist/",
     "vscode:prepublish": "npm run compile"
   },
   "dependencies": {

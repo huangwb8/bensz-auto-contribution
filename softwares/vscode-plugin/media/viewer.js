@@ -20,6 +20,7 @@
   let selected;
   let pageSize = 100;
   let trusted = false;
+  let historical = false;
   let restored = vscode.getState() || {};
   $('search').value = restored.search || '';
   const post = (type, data = {}) => vscode.postMessage({ type, ...data });
@@ -38,6 +39,7 @@
     const signature = { unsigned: t('No event signatures'), invalid: t('Invalid or unsupported signature') };
     const anchor = { not_anchored: t('Not anchored'), local_checkpoint: t('Local checkpoint only'), receipt_valid: t('Valid remote receipt'), receipt_invalid: t('Invalid remote receipt') };
     $('verification-content').append(node('p', 'note', t('{0} · {1} · {2} events checked', signature[report.signature_status] || str(report.signature_status), anchor[report.anchor_status] || str(report.anchor_status), report.checked_events)));
+    $('verification-content').append(node('p', 'note mono', t('Snapshot digest {0}', report.ledger_digest || '')), node('p', 'note', t('Source: {0}', report.source || '')));
     for (const error of report.errors || []) $('verification-content').append(node('p', '', t('Error: {0}', str(error))));
     for (const warning of report.warnings || []) $('verification-content').append(node('p', '', t('Warning: {0}', str(warning))));
   }
@@ -111,7 +113,7 @@
         const box = node('div', 'file');
         box.append(node('div', 'mono', file.path), node('div', 'note mono', file.after_hash || (file.exists === false ? t('File did not exist when recorded') : t('No file hash recorded'))));
         const actions = node('div', 'file-actions');
-        for (const [action, label] of [['open', t('Open file')], ['worktree', t('HEAD → Working tree')], ['staged', t('HEAD → Index')], ['recorded', t('Recorded commit → Working tree')]]) {
+        for (const [action, label] of [['open', t(historical ? 'Open file in this version' : 'Open file')], ['worktree', t('HEAD → Working tree')], ['staged', t('HEAD → Index')], ['recorded', t('Recorded commit → Working tree')]]) {
           const button = node('button', '', label);
           button.disabled = !trusted;
           button.addEventListener('click', () => post('file', { id: event.event_id, path: file.path, action, changeIndex: change ? Number(selected?.split(':')[1]) : undefined }));
@@ -143,21 +145,30 @@
     if (!data || typeof data.type !== 'string') return;
     if (data.type === 'busy') notice(data.text);
     if (data.type === 'error') notice(data.message, true);
-    if (data.type === 'loadError') {
+    if (data.type === 'loadError' || data.type === 'missing') {
       ledger = undefined; comparison = undefined; verification(undefined); filters(); render();
+      $('filename').textContent = data.name; $('source').textContent = data.source;
+      $('verify').disabled = true; $('compare').disabled = !data.trusted;
+      $('compare-summary').textContent = t('Select a range to view event changes');
       $('count').textContent = t('Unable to read'); $('head').textContent = ''; $('detail').replaceChildren(node('h2', '', t('Unable to open ledger')), node('p', 'note', t('Check that the file is a BAC v2 ZIP container. Use bac verify to inspect it.')));
-      notice(data.message, true);
+      if (data.type === 'missing') {
+        ledger = { events: [], count: 0 }; trusted = data.trusted;
+        $('count').textContent = t('Version absent');
+        $('detail').replaceChildren(node('h2', '', t('No ledger in this version')), node('p', 'note', t('This side has no file. The other side can still be read and verified.')));
+        filters(); render(); notice('');
+      } else notice(data.message + ' ' + t('Enable Git, trust the project, and refresh. Missing versions and damaged containers are reported separately.'), true);
     }
     if (data.type === 'ledger') {
-      ledger = data.ledger; comparison = undefined; trusted = data.trusted;
+      ledger = data.ledger; comparison = undefined; trusted = data.trusted; historical = data.historical;
       source = restored.source && ['all', 'human', 'ai', 'tool', 'system'].includes(restored.source) ? restored.source : source;
-      $('filename').textContent = data.name; $('count').textContent = t('{0} events', ledger.count);
+      $('filename').textContent = data.name; $('source').textContent = data.source; $('count').textContent = t('{0} events', ledger.count);
       $('head').textContent = t('Ledger head {0}', str(ledger.events.at(-1)?.hash).replace('sha256:', '').slice(0, 16));
       $('verify').disabled = !trusted; $('compare').disabled = !trusted;
       $('compare-summary').textContent = t('Select a range to view event changes');
       verification(data.verification); filters(); render();
       notice(trusted ? '' : t('This workspace is not trusted. Ledger viewing is available; Git, file navigation and verification are disabled.'));
       const event = ledger.events.find(e => e.event_id === (selected || restored.selected)) || ledger.events.at(-1);
+      $('detail').replaceChildren();
       if (event) { selected = event.event_id; post('event', { id: event.event_id }); render(); }
       restored = {};
     }
@@ -173,7 +184,7 @@
       setTab('changes');
       if (comparison.changes.length) { selected = 'change:0'; render(); post('change', { index: 0 }); }
     }
-    if (data.type === 'verification') { verification(data.report); notice(data.report ? t('Verification complete. The results apply to the current working tree ledger.') : t('The ledger changed. Previous verification results are no longer valid.')); }
+    if (data.type === 'verification') { verification(data.report); notice(data.report ? t('Verification complete. Results apply to {0}.', data.report.source || $('source').textContent) : t('The ledger changed. Previous verification results are no longer valid.')); }
   });
   post('ready');
 })();

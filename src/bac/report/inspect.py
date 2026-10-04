@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
 from bac.core.schema import parse_created_at
+from bac.core.intent import is_human_input_event
 
 
 def timeline(
@@ -18,11 +20,29 @@ def timeline(
 ) -> list[dict[str, Any]]:
     filtered = filter_events(events, source_type=source_type, since=since, until=until, on=on)
     selected = filtered[-limit:] if limit else filtered
+    supplements: dict[str, list[dict[str, Any]]] = {}
+    human_hashes: set[str] = set()
+    # Association spans the full ledger; filters select the parent inputs.
+    # A later supplement retains its own timestamp and source in machine output.
+    for event in events:
+        payload = event.get("payload", {})
+        if not isinstance(payload, dict):
+            continue
+        metadata = payload.get("intent_summary")
+        if is_human_input_event(event) and isinstance(event.get("event_hash"), str):
+            human_hashes.add(event["event_hash"])
+        if (
+            event.get("source_type") == "ai" and event.get("event_type") == "ai_generation"
+            and isinstance(metadata, dict) and isinstance(metadata.get("input_event_hash"), str)
+            and metadata["input_event_hash"] in human_hashes
+        ):
+            supplements.setdefault(metadata["input_event_hash"], []).append(_intent_details(event))
     items = []
     for event in selected:
         payload = event.get("payload", {})
         provenance = payload.get("input_provenance") if isinstance(payload, dict) else None
         item = {
+            "event_id": event.get("event_id"),
             "created_at": event.get("created_at"),
             "event_type": event.get("event_type"),
             "source_type": event.get("source_type"),
@@ -32,8 +52,33 @@ def timeline(
         }
         if isinstance(provenance, dict):
             item["input_provenance"] = _input_provenance_summary(provenance)
+            if isinstance(event.get("event_hash"), str) and event["event_hash"] in supplements:
+                item["intent_supplements"] = supplements[event["event_hash"]]
+        if isinstance(payload, dict) and isinstance(payload.get("intent_summary"), dict):
+            item["intent_summary"] = deepcopy(payload["intent_summary"])
+            item["intent_references"] = _intent_details(event)["intent_references"]
         items.append(item)
     return items
+
+
+def _intent_details(event: dict[str, Any]) -> dict[str, Any]:
+    payload = event["payload"]
+    evidence = event.get("evidence")
+    references = [
+        item for item in evidence
+        if isinstance(item, dict) and item.get("type") == "intent_reference"
+    ] if isinstance(evidence, list) else []
+    return {
+        "event_id": event.get("event_id"),
+        "event_hash": event.get("event_hash"),
+        "created_at": event.get("created_at"),
+        "event_type": event.get("event_type"),
+        "source_type": event.get("source_type"),
+        "trust_level": event.get("trust_level"),
+        "summary": payload.get("summary", ""),
+        "intent_summary": deepcopy(payload.get("intent_summary")),
+        "intent_references": deepcopy(references),
+    }
 
 
 def filter_events(

@@ -10,9 +10,9 @@
 <body>
   <header class="masthead">
     <div class="brand"><span class="brand-mark">BAC</span><div><h1 data-i18n="Contribution ledger">Contribution ledger</h1><p id="filename" data-i18n="Loading…">Loading…</p></div></div>
-    <div class="actions"><label class="sr-only" for="language" data-i18n="Interface language">Interface language</label><select id="language" aria-label="Interface language" data-i18n-aria-label="Interface language"><option value="en">English</option><option value="zh-CN">简体中文</option></select><button id="refresh" data-i18n="Refresh">Refresh</button><button id="verify" class="primary" data-i18n="Verify ledger">Verify ledger</button></div>
+    <div class="actions"><label class="sr-only" for="language" data-i18n="Interface language">Interface language</label><select id="language" aria-label="Interface language" data-i18n-aria-label="Interface language"><option value="en">English</option><option value="zh-CN">简体中文</option></select><button id="refresh" data-i18n="Refresh">Refresh</button><button id="verify" class="primary" disabled data-i18n="Verify ledger">Verify ledger</button></div>
   </header>
-  <section class="statusbar" aria-label="Ledger status" data-i18n-aria-label="Ledger status"><span id="count" data-i18n="— events">— events</span><span id="validation" class="validation" data-i18n="Not verified">Not verified</span><span id="head" class="mono"></span></section>
+  <section class="statusbar" aria-label="Ledger status" data-i18n-aria-label="Ledger status"><span id="source"></span><span id="count" data-i18n="— events">— events</span><span id="validation" class="validation" data-i18n="Not verified">Not verified</span><span id="head" class="mono"></span></section>
   <div id="notice" role="status" hidden></div>
   <details id="verification" hidden><summary data-i18n="Verification details">Verification details</summary><div id="verification-content"></div></details>
   <nav class="tabs" aria-label="View mode" data-i18n-aria-label="View mode"><button id="timeline-tab" class="tab active" data-i18n="Contribution timeline">Contribution timeline</button><button id="changes-tab" class="tab" data-i18n="Git changes">Git changes</button><span class="tabs-note" data-i18n="Process record · Sources and evidence">Process record · Sources and evidence</span></nav>

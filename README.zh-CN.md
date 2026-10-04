@@ -101,6 +101,21 @@ bac inspect
 
 对于 AI tool 集成，推荐在宿主收到用户消息的时刻调用 `bac input record`。它记录低敏的人类输入 provenance，而不是完整 prompt。`Prompts.md` 导入适合历史补录或交叉核验，但不应成为系统正确性的唯一来源。
 
+宿主应先阅读授权范围内的必要材料，提炼具体目标、采纳范围、关键约束和验收要求，通过 `--summary "..." --summary-source ai` 保存；人类自行提供的摘要使用 `human`。显式摘要支持 1–4000 字符，经脱敏保存，不静默截断。不传摘要时仍立即捕获输入，但标明“摘录，尚未提炼意图”。
+
+通过 `--reference-json '[{"path":"docs/report.md","hash":"sha256:<64位hex>","locator":"阶段 A/B"}]'` 绑定宿主实际读取的字节。`--reference-path docs/report.md` 只采集当前文件快照；需检测阅读后版本变化时使用带 hash 的入口。文件缺失或变化会明确失败，不生成虚假证据。必须先捕获输入时，可随后追加理解：
+
+```bash
+bac input record --message-file /tmp/user-message.txt --json
+# 使用响应中的 input_event_hash，重复输入重试也返回原值。
+bac record --event-type ai_generation --source-type ai \
+  --input-event-hash 'sha256:<原人类输入事件hash>' \
+  --summary "人类要求修复报告全部阶段的并发丢失事件、证据版本漂移、错误缺少定位；自主选择方案并保留已有功能。"
+bac inspect --human --json
+```
+
+人类时间线保留原输入，并附带来源独立的 AI 理解。采纳报告不等于人类原创报告，AI 摘要也不等于人类再次确认；验证通过仅说明结构和哈希链有效，不能证明理解正确。详见[宿主集成与行为样例](docs/bac-tutorial.md#先理解目标再记录摘要)。
+
 所有命令都支持 `--root`（指定目标项目）和 `--bac-file`（指定自定义账本路径）。`init`、`record`、`input`、`verify`、`repair`、`inspect` 还支持 `--json`，便于 AI tool 和自动化流程调用。
 
 ## `.bac` 文件里有什么？

@@ -10,6 +10,7 @@ from typing import Any
 
 from bac import __version__
 from bac.core.hash_chain import attach_event_hash
+from bac.core.intent import MAX_INTENT_SUMMARY_LENGTH, validate_intent_metadata
 from bac.core.schema import (
     ATTRIBUTION_REPAIR_HINT,
     FORMAT_VERSION,
@@ -21,6 +22,7 @@ from bac.core.schema import (
 from bac.service.evidence import (
     build_human_input_evidence,
     collect_file_snapshots,
+    collect_intent_references,
     collect_git_diff_evidence,
     collect_project_context,
     human_input_event_type,
@@ -73,12 +75,19 @@ def build_record_event(
     exit_code: int | None = None,
     payload: dict[str, Any] | None = None,
     evidence: list[dict[str, Any]] | None = None,
+    references: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     trust = trust_level or _default_trust(event_type, source_type)
     event_payload = dict(payload or {})
     event_payload["summary"] = summary
+    if "intent_summary" in event_payload and (
+        not isinstance(summary, str) or not summary.strip() or len(summary) > MAX_INTENT_SUMMARY_LENGTH
+    ):
+        raise ValueError(f"intent summary must contain 1..{MAX_INTENT_SUMMARY_LENGTH} characters")
 
     event_evidence = list(evidence or [])
+    if references:
+        event_evidence.extend(collect_intent_references(root, references))
     if files:
         file_snapshots = collect_file_snapshots(root, files)
         event_payload["files"] = file_snapshots
@@ -148,6 +157,9 @@ def build_human_input_event(
     start_line: int | None = None,
     end_line: int | None = None,
     actor: dict[str, Any] | None = None,
+    summary: str | None = None,
+    summary_source: str | None = None,
+    references: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     summary, payload, evidence = build_human_input_evidence(
         text=text,
@@ -159,6 +171,8 @@ def build_human_input_event(
         source_path=source_path,
         start_line=start_line,
         end_line=end_line,
+        summary=summary,
+        summary_source=summary_source,
     )
     provenance = payload["input_provenance"]
     event_type = human_input_event_type(provenance["classification"])
@@ -171,6 +185,7 @@ def build_human_input_event(
         actor=actor or default_actor("human", "human"),
         payload=payload,
         evidence=evidence,
+        references=references,
     )
 
 
@@ -205,6 +220,9 @@ def build_event(
         "event_hash": None,
         "signature": None,
     }
+    intent_errors = validate_intent_metadata(event)
+    if intent_errors:
+        raise ValueError("; ".join(intent_errors))
     return attach_event_hash(event)
 
 

@@ -101,6 +101,21 @@ bac inspect
 
 For a host integration, call `bac input record` when the user message arrives. It stores a low-sensitivity provenance record rather than the complete prompt. A `Prompts.md` import is available for backfill, but it is supplementary evidence, not the primary source.
 
+The host should read the authorized context and summarize the specific goal, adopted scope, constraints and acceptance criteria. Pass `--summary "..." --summary-source ai`; use `human` only for a human-provided summary. Explicit summaries accept 1–4000 characters and are redacted without silent shortening. No summary means a labeled excerpt, with intent still uninterpreted.
+
+Use `--reference-json '[{"path":"docs/report.md","hash":"sha256:<64 hex digits>","locator":"Stages A/B"}]'` to bind the summary to the bytes the host read. `--reference-path docs/report.md` snapshots the file at collection time; use the hash form to detect changes since reading. Missing or changed files fail rather than produce invented evidence. If capture must happen first, append an interpretation later:
+
+```bash
+bac input record --message-file /tmp/user-message.txt --json
+# Use input_event_hash from the response (also returned on a duplicate retry).
+bac record --event-type ai_generation --source-type ai \
+  --input-event-hash 'sha256:<original input event hash>' \
+  --summary "The user adopted all report stages: fix lost concurrent events, stale evidence hashes and missing error locations; preserve existing behavior."
+bac inspect --human --json
+```
+
+`inspect --human` preserves the original input and attaches separately labeled AI supplements. Adopting a report does not imply human authorship of that report or confirmation of an AI summary. Verification checks structure and the hash chain, not whether an interpretation is faithful. See the [host integration examples](docs/bac-tutorial.md#先理解目标再记录摘要).
+
 All commands accept `--root` (target project) and `--bac-file` (custom ledger path). `init`, `record`, `input`, `verify`, `repair`, and `inspect` also support `--json` for AI tools and automation.
 
 ## What the `.bac` file contains

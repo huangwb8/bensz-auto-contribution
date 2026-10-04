@@ -10,8 +10,8 @@ cd /docker/bensz-auto-contribution; docker-compose pull; docker-compose down; do
 
 ```
 github项目：huangwb8/bensz-auto-contribution
-repo-version=1.3.5
-vscode-version=0.1.1
+repo-version=1.3.6
+vscode-version=0.1.2
 请：
  - git-commit skill保存变更; 仅用1个commit； 新增 tag 为 v{repo-version}，并且该commit信息要提到更新版本,并且体现的是这个版本与上一个版本之间的所有变化；
  - git-publish-release skill 发布为一个release到github仓库
@@ -34,6 +34,23 @@ vscode-version=0.1.1
 ```
 
 # 日常
+
+---
+
+基于  docs/plans/2026-10-04-human-intent-summary.md 优化源代码。计划里的所有阶段的问题（p0-p2级）都要解决。如果工作时有疑问，或者有更好的方案，自己选个最优方案优化，不要问我。不要破坏其它已经存在的功能。要保证最终成品能正常、稳定、高效地工作。
+
+---
+
+ai使用bac记录人类的贡献时，有时候会过于地形式主义，而不是反映人类的真实意图。 比如，人类说：
+```
+基于 docs/events/2026-10-04-rhythm功能簇bug猎捕调查报告.md 发现的bugs 优化源代码。计划里的所有阶段的问题（p0-p2级）都要解决。如果工作时有疑问，或者有更好的方案，自己选个最优方案优化，不要问我。不要破坏其它已经存在的功能。要保证最终成品能正常、稳定、高效地工作。
+```
+
+其实，人类的真实意图在那个md计划里； 其它的文字只是一些通用的约束。 但是，这个时候，ai往往会记录“人类做了一个计划“； 但是不会说“人类计划做xxx事“。  这是为什么？
+
+---
+
+基于 docs/plans/2026-10-04-vscode-bac-scm-compatibility.md 优化源代码。计划里的所有阶段的问题（p0-p2级）都要解决。如果工作时有疑问，或者有更好的方案，自己选个最优方案优化，不要问我。不要破坏其它已经存在的功能。要保证最终成品能正常、稳定、高效地工作。
 
 ---
 

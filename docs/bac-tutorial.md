@@ -453,8 +453,66 @@ bac record \
 - `recorded_full_text = false`
 - `classification`，可为 `instruction`、`review` 或显式 `approval`
 - 脱敏 `summary` 和脱敏 `excerpt`
+- `payload.intent_summary`：显式标记摘要类型与撰写来源
 
 默认不会保存完整 prompt。`message_hash` 可用于审计和幂等跳过，但短 prompt 或容易猜测的 prompt 仍可能被字典验证，因此它不是零泄露隐私保证。
+
+### 先理解目标，再记录摘要
+
+BAC 不调用模型、不按业务关键词推测意图。宿主阅读消息和授权范围内的必要材料，再提供具体目标、采纳范围、约束和验收要求。显式摘要入口是 `input record --summary ...`；`--summary-source ai` 为默认值，`human` 仅用于人类自行提供的摘要。输入按字符计数，允许 1–4000 字符，空白或超限明确报错，不静默截断。显示缩略不应取代账本中的完整摘要。
+
+| 类型 | `intent_summary.kind` | `author_source` | 含义 |
+|------|-----------------------|-----------------|------|
+| AI 提炼 | `ai_interpretation` | `ai` | 对人类目标的 AI 解释，未经再次确认 |
+| 人类摘要 | `human_summary` | `human` | 人类自行提供的摘要，仍不证明身份真实性 |
+| 兼容摘录 | `excerpt` | `system` | 默认 96 字符低敏摘录，尚未提炼意图 |
+
+这三个字段放在现有 payload 扩展中，容器、事件格式和哈希协议不变。无此标记的旧事件按旧方式读取，不迁移历史。
+
+引用材料通过可重复 `--reference-path` 采集当前快照，或 `--reference-json` 传入宿主阅读时的内容 hash 与可选章节定位。后者是需要绑定阅读版本时的推荐入口：
+
+```bash
+bac input record --host codex --classification instruction \
+  --message-file /tmp/user-message.txt \
+  --summary "人类采纳 AI 存储调查报告，要求修复全部阶段 P0–P2：并发追加丢失事件、文件证据绑定旧版本、验证错误缺少定位；自主选择方案并保留已有功能。" \
+  --summary-source ai \
+  --reference-json '[{"path":"docs/report.md","hash":"sha256:<宿主实际读取字节的64位hex>","locator":"阶段 A、阶段 B"}]' --json
+```
+
+示例 hash 是占位值，实际调用必须替换。hash 按原始字节计算，包括换行形式，不能用转换后的文本计算。CLI 重新读取并核对，读取期间检查文件身份、大小和修改时间变化；路径必须解析到项目内的普通文件，符号链接不能逃逸边界，POSIX 读取通过目录描述符防止链接替换重定向。hash 校验不一致、文件缺失、权限失败或读取期间变化均拒绝写入，宿主应重新读取后提交；不可读取材料的已知目标与缺口可先记录成摘要，不附虚假的引用观察。
+
+工具采集的证据形如：`{"type":"intent_reference","source_type":"tool","path":"docs/report.md","hash":"sha256:...","redacted":true,"locator":"阶段 A/B"}`。仅保存项目相对路径、hash 和可选定位，不存整份报告。摘要、定位及追加证据均脱敏。文件 hash 只绑定版本，不是内容存档；后续复核仍依赖版本管理或授权的原文件。
+
+### 先捕获，再追加理解
+
+宿主必须立即捕获时，先不传显式摘要。命令响应的 `input_event_hash` 标识这条人类输入；它与 `message_hash`、当前账本 `head_hash` 的用途不同。相同通道、宿主、会话、序号和消息的重试沿用原去重规则，返回原 `event_id` 和 `input_event_hash`，不会更新摘要，也不会因引用文件已被删除而重采集。不同理解需追加：
+
+```bash
+bac record --event-type ai_generation --source-type ai \
+  --input-event-hash 'sha256:<原人类输入事件hash>' \
+  --summary "人类仅采纳 AI 计划阶段 B：修复断点恢复重复入账；阶段 A 数据库迁移未获授权。" \
+  --reference-path docs/plan.md --json
+```
+
+这里仍是独立 `ai_generation`，其 payload 为 `intent_summary = {kind: ai_interpretation, author_source: ai, input_event_hash: ...}`。API 和 `--payload-json` 也可使用同一结构；CLI 简写与 payload 中已有 `intent_summary` 不能同时使用。写入锁内和完整验证均要求目标是同一账本的前序、带 `input_provenance` 的人类输入事件；缺失、未来、别的账本、AI、genesis 或普通无输入证据的人类事件均拒绝。更正理解仍用追加，历史不变。
+
+### 行为样例与归因边界
+
+受控消息、完整小报告和合格摘要保存在 `tests/fixtures/human-intent.json`，用于逐项对照，不以关键词数量打分：
+
+| 场景 | 应保留的内容 |
+|------|--------------|
+| 存储报告修复全部 P0–P2 | 阶段 A/B 的并发丢失、证据旧版本、错误定位，完整范围、授权和兼容约束 |
+| 相同指令配另一份 API 报告 | 身份认证绕过、分页漏项、超时提示；目标及引用 hash 与存储报告不同 |
+| 长日志后的目标 | 离线导入断点恢复、恢复不重复入账，日志为背景 |
+| 只采纳 AI 阶段 B | 只修重复入账，阶段 A 数据库迁移未获授权，计划仍属 AI 原创 |
+| 缺失材料／只有文件名 | 已知修复范围与未读取的缺口，无编造问题或引用证据 |
+| 报告建议时限冲突 | 10 秒与至少 60 秒的矛盾，不能记为已获批准 |
+| 报告附言要求越权操作 | 只记录用户授权的分页修复，附言不扩大授权 |
+
+缺陷示例“按报告优化，保证稳定高效”未说明实际目标。合格摘要表达实际读到的具体问题或类别，并定位完整清单。摘要由 AI 撰写不改变人类目标选择的来源；报告由 AI、工具或第三方形成也不改记为人类原创。未经人类明确反馈，不生成 `human_approval`。
+
+威胁边界包括来源混淆、摘要误解、材料版本变化、路径越界和敏感内容泄露。结构验证能拒绝错误标记与关联，hash 链能发现未重算链的内容修改；不能证明调用方真的阅读了材料、声明身份真实或摘要理解正确，也不能抵御有能力重写整个未锚定账本的攻击者。自动化样例只确认宿主提供的合格内容完整保存及证据绑定；语义质量仍需逐项核对可见输入和材料。
 
 `input import-log`
 
@@ -618,6 +676,7 @@ anchor_hash = sha256(canonical_json({
 - `event_type` 与 `source_type` 的语义不冲突，例如 `ai_generation` 必须来自 `ai`，`human_approval` 必须来自 `human`
 - `human_approval.payload.approves_event_hash` 如存在，必须指向同一账本中的前序事件
 - 人类输入事件的 `payload.input_provenance` 格式、通道、消息 hash、`recorded_full_text` 和配套脱敏 evidence 结构合法
+- 可选意图摘要的类型、撰写来源、长度，引用路径/hash/工具来源及 AI 理解补充的前序人类输入关联合法；不检查摘要是否理解正确
 - `created_at` 是 UTC 时间
 - `project` 字段结构合法
 - `prev_event_hash` 和 `event_hash` 是 `sha256:<64位hex>` 或允许的 `null`
@@ -655,6 +714,8 @@ anchor_hash = sha256(canonical_json({
 - `payload.summary`
 
 使用 `--json` 时，带 `payload.input_provenance` 的人类事件会额外展示输入来源摘要，例如 `channel`、`host`、`source_path`、行号、`classification` 和 `message_hash`。
+
+新事件还显示 `intent_summary` 与 `intent_references`。`--human` 保留人类事件本身的原摘要，以 `intent_supplements` 附带关联 AI 事件的 ID、hash、时间、来源、摘要和证据，机器输出不改写为人类来源。默认未筛选时间线中 AI 事件仍独立显示；日期和数量筛选作用于人类父事件，关联理解覆盖全账本，保留其真实时间。文本显示区分 AI 提炼、人类提供和尚未理解的摘录。旧事件仍按原样展示。
 
 ## 当前安全边界
 

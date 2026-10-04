@@ -23,7 +23,7 @@ from bac.core.anchor import (
     verify_anchor_receipt,
 )
 from bac.core.canonicalize import canonical_json
-from bac.core.hash_chain import is_sha256
+from bac.core.hash_chain import attach_event_hash, is_sha256
 from bac.core.schema import EVENT_TYPES, SOURCE_TYPES, TRUST_LEVELS
 from bac.core.verify import verify_bac_file
 from bac.report.inspect import timeline
@@ -34,7 +34,8 @@ from bac.service.event_builder import (
     build_record_event,
     default_actor,
 )
-from bac.service.evidence import parse_prompt_log_blocks
+from bac.service.evidence import collect_intent_references, parse_prompt_log_blocks
+from bac.service.redaction import redact_data
 from bac.service.repair import repair_stale_tail
 from bac.storage.bac_file import (
     DEFAULT_BAC_FILE,
@@ -77,6 +78,9 @@ def build_parser() -> argparse.ArgumentParser:
     record.add_argument("--source-type", required=True, choices=sorted(SOURCE_TYPES))
     record.add_argument("--trust-level", choices=sorted(TRUST_LEVELS))
     record.add_argument("--summary", required=True)
+    record.add_argument("--input-event-hash", help="append an AI intent supplement linked to an earlier human input hash")
+    record.add_argument("--reference-path", action="append", default=[], help="project file used to interpret intent")
+    record.add_argument("--reference-json", help="reference list with path, host reading hash and optional locator")
     record.add_argument("--path", action="append", default=[], help="project file path to snapshot")
     record.add_argument("--command-text", help="command text to record")
     record.add_argument("--exit-code", type=int, help="command exit code")
@@ -97,6 +101,10 @@ def build_parser() -> argparse.ArgumentParser:
     input_record.add_argument("--message-index", type=int)
     input_record.add_argument("--message-file", help="read the user message from a file; stdin is used when omitted")
     input_record.add_argument("--classification", choices=["instruction", "review", "approval"])
+    input_record.add_argument("--summary", help="explicit intent summary, 1..4000 characters; never silently shortened")
+    input_record.add_argument("--summary-source", choices=["ai", "human"], help="summary author (default: ai for explicit summaries)")
+    input_record.add_argument("--reference-path", action="append", default=[], help="project file used to interpret intent")
+    input_record.add_argument("--reference-json", help="reference list with path, host reading hash and optional locator")
     input_record.add_argument("--json", action="store_true", help="print machine-readable output")
     input_record.set_defaults(func=_cmd_input_record)
     input_import = input_subparsers.add_parser("import-log", help="import redacted human input from a prompt log")
@@ -231,6 +239,11 @@ def _cmd_record(args: argparse.Namespace) -> int:
     bac_path = _bac_path(root, args.bac_file)
     payload = _json_object(args.payload_json, "payload-json") if args.payload_json else {}
     evidence = _json_list(args.evidence_json, "evidence-json") if args.evidence_json else []
+    if args.input_event_hash:
+        if "intent_summary" in payload:
+            raise ValueError("--input-event-hash cannot be combined with payload.intent_summary")
+        payload["intent_summary"] = {"kind": "ai_interpretation", "author_source": "ai", "input_event_hash": args.input_event_hash}
+    references = _intent_references(args)
     with locked_bac_file(bac_path):
         events = read_events(bac_path)
         if not events:
@@ -263,6 +276,7 @@ def _cmd_record(args: argparse.Namespace) -> int:
             exit_code=args.exit_code,
             payload=payload,
             evidence=evidence,
+            references=references,
         )
         append_event(bac_path, event, lock=False)
     output = {
@@ -287,6 +301,9 @@ def _cmd_input_record(args: argparse.Namespace) -> int:
     root = Path(args.root).resolve()
     bac_path = _bac_path(root, args.bac_file)
     text = _read_message_text(args.message_file)
+    references = _intent_references(args)
+    if references and args.summary is None:
+        raise ValueError("intent references require an explicit summary")
     with locked_bac_file(bac_path):
         events = read_events(bac_path)
         if not events:
@@ -304,6 +321,8 @@ def _cmd_input_record(args: argparse.Namespace) -> int:
             session_id=args.session_id,
             message_index=args.message_index,
             classification=args.classification,
+            summary=args.summary,
+            summary_source=args.summary_source,
         )
         existing = _find_human_input_event(events, _human_input_idempotency_key(draft))
         if existing:
@@ -314,10 +333,19 @@ def _cmd_input_record(args: argparse.Namespace) -> int:
                 "event_id": existing.get("event_id"),
                 "event_type": existing.get("event_type"),
                 "head_hash": head_hash,
+                "input_event_hash": existing.get("event_hash"),
+                "message_hash": existing["payload"]["input_provenance"]["message_hash"],
             }
             _print_output(output, args.json)
             return 0
 
+        # Evidence collection follows deduplication so a retry does not depend
+        # on references still being available or overwrite earlier observations.
+        if references:
+            collected, redactions = redact_data(collect_intent_references(root, references))
+            draft["evidence"].extend(collected)
+            draft["redactions"].extend(redactions)
+            draft = attach_event_hash(draft)
         append_event(bac_path, draft, lock=False)
     output = {
         "status": "recorded",
@@ -326,6 +354,7 @@ def _cmd_input_record(args: argparse.Namespace) -> int:
         "event_id": draft["event_id"],
         "event_type": draft["event_type"],
         "head_hash": draft["event_hash"],
+        "input_event_hash": draft["event_hash"],
         "message_hash": draft["payload"]["input_provenance"]["message_hash"],
         "redactions": draft["redactions"],
     }
@@ -455,11 +484,26 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
         print(canonical_json(items))
     else:
         for item in items:
+            metadata = item.get("intent_summary")
+            label = _intent_label(metadata) if metadata else ""
             print(
                 f"{item['created_at']}  {item['event_type']}  "
-                f"{item['source_type']}/{item['trust_level']}  {item['summary']}"
+                f"{item['source_type']}/{item['trust_level']}  {label}{item['summary']}"
             )
+            for supplement in item.get("intent_supplements", []):
+                print(f"  ai/{supplement['trust_level']}  {_intent_label(supplement['intent_summary'])}{supplement['summary']}  ({supplement['event_hash']})")
     return 0
+
+
+def _intent_label(metadata: dict[str, Any]) -> str:
+    kind = metadata.get("kind")
+    if not isinstance(kind, str):
+        return ""
+    return {
+        "ai_interpretation": "[AI interpretation; not human confirmation] ",
+        "human_summary": "[human-provided summary] ",
+        "excerpt": "[excerpt; intent not yet interpreted] ",
+    }.get(kind, "")
 
 
 def _cmd_config_set(args: argparse.Namespace) -> int:
@@ -661,6 +705,16 @@ def _json_list(raw: str, label: str) -> list[dict[str, Any]]:
     if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
         raise ValueError(f"{label} must be a JSON list of objects")
     return value
+
+
+def _intent_references(args: argparse.Namespace) -> list[dict[str, Any]]:
+    references = [{"path": path} for path in args.reference_path]
+    if args.reference_json:
+        explicit = _json_list(args.reference_json, "reference-json")
+        if any(not isinstance(item.get("path"), str) or not is_sha256(item.get("hash")) for item in explicit):
+            raise ValueError("reference-json requires path and a sha256:<hex> host reading hash")
+        references.extend(explicit)
+    return references
 
 
 def _validate_record_payload_against_ledger(

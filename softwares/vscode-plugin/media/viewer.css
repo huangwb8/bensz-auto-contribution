@@ -93,3 +93,5 @@ footer { color: var(--muted); border-top: 1px solid var(--line); padding: 14px 2
   .events { max-height: 280px; } .detail { padding: 20px; } .brand-mark { font-size: 21px; } h1 { font-size: 18px; }
   .actions button { padding: 5px 8px; } #git-controls { padding-inline: 18px; }
 }
+
+#source { color: var(--fg); font-weight: 600; overflow-wrap: anywhere; }

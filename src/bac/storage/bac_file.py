@@ -22,7 +22,8 @@ from bac.core.container import (
     event_path,
     event_sequence,
 )
-from bac.core.hash_chain import compute_event_hash
+from bac.core.hash_chain import compute_event_hash, is_sha256
+from bac.core.intent import validate_intent_metadata
 from bac.core.verify import verify_bac_file
 
 try:
@@ -170,6 +171,17 @@ def _append_event_unlocked(
     if not events:
         raise ValueError(f"BAC file contains no events: {path}")
     current_hash = events[-1].get("event_hash")
+    payload = event.get("payload")
+    metadata = payload.get("intent_summary") if isinstance(payload, dict) else None
+    previous = None
+    if isinstance(metadata, dict) and "input_event_hash" in metadata:
+        previous = {
+            item["event_hash"]: item for item in events
+            if isinstance(item, dict) and is_sha256(item.get("event_hash"))
+        }
+    intent_errors = validate_intent_metadata(event, previous)
+    if intent_errors:
+        raise ValueError("; ".join(intent_errors))
     if not isinstance(current_hash, str):
         raise ValueError("current BAC head is missing event_hash")
     if event.get("prev_event_hash") != current_hash:

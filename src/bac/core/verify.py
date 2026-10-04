@@ -18,6 +18,7 @@ from bac.core.container import (
     event_sequence,
 )
 from bac.core.hash_chain import compute_event_hash, is_sha256
+from bac.core.intent import validate_intent_metadata
 from bac.core.schema import FORMAT_VERSION, parse_created_at, validate_event_schema, validate_event_source_policy
 
 HUMAN_INPUT_FORMAT = "bac.human_input.v1"
@@ -113,6 +114,7 @@ def verify_events(events: list[Any], require_anchor: bool = False) -> Verificati
     invalid_receipt_count = 0
     anchored_head_hashes: list[str] = []
     previous_event_hashes: set[str] = set()
+    previous_events: dict[str, dict[str, Any]] = {}
     has_ai_activity = False
     has_human_input_provenance = False
 
@@ -135,6 +137,7 @@ def verify_events(events: list[Any], require_anchor: bool = False) -> Verificati
             )
         )
         _validate_human_approval_reference(event, previous_event_hashes, errors)
+        errors.extend(f"event {event_id}: {error}" for error in validate_intent_metadata(event, previous_events))
         if _validate_human_input_provenance(event, errors):
             has_human_input_provenance = True
         if _is_ai_activity(event):
@@ -211,6 +214,7 @@ def verify_events(events: list[Any], require_anchor: bool = False) -> Verificati
         previous_hash = event.get("event_hash")
         if is_sha256(previous_hash):
             previous_event_hashes.add(previous_hash)
+            previous_events[previous_hash] = event
 
     if signed_count == 0:
         signature_status = "unsigned"

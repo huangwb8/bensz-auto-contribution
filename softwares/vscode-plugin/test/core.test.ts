@@ -1,12 +1,13 @@
 import { t, setLanguage, getLanguage } from '../src/i18n';
 import { test } from 'node:test';
 import * as assert from 'node:assert/strict';
-import { mkdtemp, mkdir, symlink, rm, readFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, symlink, rm, readFile, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { readLedger, compareLedgers, MAX_BAC_BYTES } from '../src/ledger';
 import { safeProjectPath } from '../src/paths';
 import { event, entries, zip } from './fixtures';
+import { runFile, readBlob, parseGitResource, gitRef } from '../src/git';
 
 test('reads BAC v2 without presenting parsing as verification', async () => {
   const ledger = await readLedger(zip(entries()));
@@ -85,4 +86,50 @@ test('defaults to English, supports explicit Chinese and keeps inserted evidence
   setLanguage('unexpected-locale');
   assert.equal(getLanguage(), 'en');
   await assert.rejects(readLedger(Buffer.alloc(MAX_BAC_BYTES + 1)), /ledger exceeds/);
+});
+
+test('validates Git URI paths and preserves special index/merge references', () => {
+  const file = path.resolve('docs/contribution.bac');
+  for (const ref of ['', '~', 'HEAD', '~1', ':2', 'a'.repeat(40)]) assert.equal(parseGitResource(JSON.stringify({ path: file, ref }), file).ref, ref);
+  for (const query of ['{', '{}', JSON.stringify({ path: file, ref: '--help' }), JSON.stringify({ path: file, ref: 'HEAD', submoduleOf: '/elsewhere' }), JSON.stringify({ path: `${file}/../escape.bac`, ref: '' }), JSON.stringify({ path: file, ref: '~0' })]) assert.throws(() => parseGitResource(query, file));
+  assert.throws(() => parseGitResource(JSON.stringify({ path: file, ref: '' }), path.resolve('other.bac')));
+  assert.equal(gitRef('', false), ':'); assert.equal(gitRef('~', true), ':'); assert.equal(gitRef('~', false), 'HEAD');
+  assert.equal(gitRef('~2', false), ':2'); assert.equal(gitRef('HEAD', true), 'HEAD');
+});
+
+test('raw Git reads distinguish HEAD, index, deletion, missing commits, conflicts and corrupt bytes', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'bac-git-test-'));
+  const filename = 'ledger [*].bac';
+  const first = zip(entries());
+  const second = zip(entries([event(), event('index', 'ai')]));
+  const git = (...args: string[]) => runFile('git', args, root);
+  try {
+    await git('init'); await git('config', 'user.name', 'Test'); await git('config', 'user.email', 'test@example.invalid');
+    assert.equal(await readBlob(root, 'HEAD', filename), undefined);
+    await writeFile(path.join(root, filename), first); await git('add', '--', filename); await git('commit', '-m', 'Initial');
+    await writeFile(path.join(root, filename), second); await git('add', '--', filename);
+    await writeFile(path.join(root, filename), Buffer.from('corrupt working tree'));
+    assert.deepEqual(await readBlob(root, 'HEAD', filename), first);
+    assert.deepEqual(await readBlob(root, ':', filename), second);
+    assert.equal(await readBlob(root, 'HEAD', 'absent.bac'), undefined);
+    await assert.rejects(readBlob(root, 'f'.repeat(40), filename), /revision is unavailable/);
+    await assert.rejects(readBlob(root, ':', filename, 5), /read limit/);
+    await assert.rejects(readBlob(root, 'HEAD', '../escape.bac'), /outside/);
+    // A configured textconv must never transform the raw ledger or run a process.
+    await writeFile(path.join(root, '.gitattributes'), '*.bac diff=bac-test\n');
+    await git('config', 'diff.bac-test.textconv', 'nonexistent-bac-textconv');
+    assert.deepEqual(await readBlob(root, 'HEAD', filename), first);
+    await git('rm', '--cached', '-f', '--', filename);
+    assert.equal(await readBlob(root, ':', filename), undefined);
+    const oid = (await git('rev-parse', `HEAD:${filename}`)).toString('utf8').trim();
+    // Build real unmerged stage entries without changing the project repository.
+    const { execFileSync } = await import('node:child_process');
+    execFileSync('git', ['update-index', '--index-info'], { cwd: root, input: `100644 ${oid} 1\t${filename}\n100644 ${oid} 2\t${filename}\n` });
+    await assert.rejects(readBlob(root, ':', filename), /merge conflicts/);
+    assert.deepEqual(await readBlob(root, ':1', filename), first);
+    await assert.rejects(readBlob(root, ':3', filename), /merge stage is unavailable/);
+    const corrupt = await git('hash-object', '-w', '--', filename);
+    execFileSync('git', ['update-index', '--index-info'], { cwd: root, input: `100644 ${corrupt.toString('utf8').trim()} 2\t${filename}\n` });
+    await assert.rejects(readLedger((await readBlob(root, ':2', filename))!), /ZIP/);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
