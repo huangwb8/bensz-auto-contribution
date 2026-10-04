@@ -45,6 +45,12 @@ code --install-extension dist/bac-viewer-0.1.2.vsix --force
 
 也可在 VS Code 扩展面板的菜单中选择 **从 VSIX 安装**。已打开的 `.bac` 可右键标签，选择 **重新打开编辑器的方式 → BAC Contribution Ledger**；如安装后没有自动切换，可执行 **Developer: Reload Window**。
 
+### 源代码管理仍提示编辑器错误
+
+源代码管理的 Git 资源需要 **0.1.2 或更高版本**；0.1.0 和 0.1.1 会在查看器打开前拒绝这类资源。安装新版后，已打开的窗口可能仍加载旧代码。
+
+先执行 `code --list-extensions --show-versions`，确认有 `bensz.bac-viewer@0.1.2`（或更高版本）。需要时安装上方已检查的 VSIX，再在出错窗口执行 **Developer: Reload Window（开发人员：重新加载窗口）**，关闭失败标签，重新点击源代码管理条目。若仍失败，点击 **显示日志**，检查堆栈中的 `bac-viewer-<版本>/dist/extension.js` 路径；若仍指向 `bac-viewer-0.1.0` 或 `bac-viewer-0.1.1`，说明该窗口仍在使用旧代码，还需检查当前 VS Code 配置文件及其中启用的插件版本。
+
 ### Marketplace 发布
 
 公开发布遵循微软的 [扩展发布指南](https://code.visualstudio.com/api/working-with-extensions/publishing-extension)，本项目操作说明位于仓库根目录 `docs/vscode-marketplace-release.md`。VSIX 文件名随 `package.json` 中的插件版本生成；插件版本与 Python 包版本独立。

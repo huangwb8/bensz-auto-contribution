@@ -47,6 +47,12 @@ code --install-extension dist/bac-viewer-0.1.2.vsix --force
 
 Alternatively, choose **Install from VSIX** in the Extensions view menu. For an already open `.bac`, right-click its tab and choose **Reopen Editor With → BAC Contribution Ledger**. Run **Developer: Reload Window** if the viewer does not activate after installation.
 
+### Source Control still reports an editor error
+
+Git resources from Source Control require **0.1.2 or later**. Versions 0.1.0 and 0.1.1 reject this resource before the viewer opens. Installing an update does not prove an existing window has loaded it.
+
+Check `code --list-extensions --show-versions` for `bensz.bac-viewer@0.1.2` (or a later version). If needed, install the checked VSIX above, then run **Developer: Reload Window** in the affected window, close the failed tab and click the Source Control entry again. If it still fails, use **Show Logs** and check the version in the `bac-viewer-<version>/dist/extension.js` stack path. A path ending in `bac-viewer-0.1.0` or `bac-viewer-0.1.1` means that window is still using the old code; also check the active VS Code profile and its enabled extension version.
+
 ### Marketplace publishing
 
 Follow Microsoft's [extension publishing guide](https://code.visualstudio.com/api/working-with-extensions/publishing-extension). Repository-specific instructions are in [docs/vscode-marketplace-release.md](https://github.com/huangwb8/bensz-auto-contribution/blob/main/docs/vscode-marketplace-release.md). The VSIX filename follows the extension version in `package.json`, which is independent of the Python package version.
