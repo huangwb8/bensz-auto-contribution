@@ -95,3 +95,9 @@ footer { color: var(--muted); border-top: 1px solid var(--line); padding: 14px 2
 }
 
 #source { color: var(--fg); font-weight: 600; overflow-wrap: anywhere; }
+
+/* Change kind uses both text and a border; source colors retain their meaning. */
+.event-row[data-change] { border-left: 3px solid var(--vscode-editorGutter-modifiedBackground, #cca85a); }
+.event-row[data-change="added"] { border-left-color: var(--vscode-editorGutter-addedBackground, #57a77b); background: var(--vscode-diffEditor-insertedLineBackground, #57a77b12); }
+.event-row[data-change="removed"] { border-left-color: var(--vscode-editorGutter-deletedBackground, #db7070); background: var(--vscode-diffEditor-removedLineBackground, #db707012); }
+.event-row[data-change].selected { background: var(--selected); }

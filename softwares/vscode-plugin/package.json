@@ -2,7 +2,7 @@
   "name": "bac-viewer",
   "displayName": "BAC Contribution Ledger",
   "description": "Explore BAC contribution timelines, Git ledger changes and related code diffs.",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "publisher": "bensz",
   "license": "MIT",
   "engines": {
@@ -146,5 +146,10 @@
     "esbuild": "^0.25.0",
     "playwright": "^1.55.0",
     "typescript": "^5.9.0"
+  },
+  "overrides": {
+    "@vscode/vsce": {
+      "minimatch": "^11.0.1"
+    }
   }
 }

@@ -1,6 +1,10 @@
 /* Shared by the extension host and webview. Event content is never translated. */
 (function (root) {
   const chinese = {
+  "No changed events on this side.": "此侧没有变更记录。",
+  "No event changes.": "没有事件变化。",
+  "Use the contribution timeline to explore the full history.": "可切换到贡献时间线查看完整历史。",
+  "{0} unchanged events hidden": "已隐藏 {0} 条未变化记录",
   "Only local files and Git ledger versions are supported.": "仅支持本地文件和 Git 账本版本。",
   "Invalid Git ledger URI.": "Git 账本地址格式无效。",
   "Invalid or unsupported Git ledger URI.": "Git 账本地址格式无效或版本类型暂不支持。",

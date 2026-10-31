@@ -35,6 +35,8 @@ interface Session {
   ledger?: Ledger;
   comparison?: LedgerComparison;
   mode?: CompareMode;
+  peer?: Session;
+  side?: 'before' | 'after';
   verification?: Record<string, unknown>;
   generation: number;
 }
@@ -54,7 +56,13 @@ export class TextDocuments implements vscode.TextDocumentContentProvider {
 
 export class Viewer implements vscode.CustomReadonlyEditorProvider {
   private sessions = new Set<Session>();
+  private pairTimer?: ReturnType<typeof setTimeout>;
   constructor(private context: vscode.ExtensionContext, private texts: TextDocuments) {}
+
+  private schedulePairing(): void {
+    clearTimeout(this.pairTimer);
+    this.pairTimer = setTimeout(() => this.pairScmViews(), 100);
+  }
 
   async openCustomDocument(uri: vscode.Uri): Promise<vscode.CustomDocument> {
     if (!['file', 'git'].includes(uri.scheme)) throw new Error(t('Only local files and Git ledger versions are supported.'));
@@ -71,6 +79,7 @@ export class Viewer implements vscode.CustomReadonlyEditorProvider {
       session.closed = true;
       session.generation++;
       this.sessions.delete(session);
+      if (session.peer) { session.peer.peer = undefined; session.peer.side = undefined; }
       subscriptions.forEach(item => item.dispose());
     }));
     try { session.source = await this.source(document.uri); }
@@ -80,21 +89,22 @@ export class Viewer implements vscode.CustomReadonlyEditorProvider {
     const html = await this.html(panel.webview);
     if (session.closed) return;
     panel.webview.html = html;
+
     const message = panel.webview.onDidReceiveMessage(async (value: unknown) => {
       if (!isObject(value) || typeof value.type !== 'string') return;
       try {
         if (value.type === 'language' && (value.language === 'en' || value.language === 'zh-CN')) {
           await vscode.workspace.getConfiguration('bacViewer').update('language', value.language, vscode.ConfigurationTarget.Global);
         }
-        else if (value.type === 'ready' || value.type === 'refresh') await this.refresh(session);
+        else if (value.type === 'ready' || value.type === 'refresh') { this.schedulePairing(); await this.refresh(session); }
         else if (value.type === 'compare' && ['head-worktree', 'head-index', 'index-worktree'].includes(String(value.mode))) await this.compare(session, value.mode as CompareMode);
         else if (value.type === 'verify') await this.verify(session);
         else if (value.type === 'event' && typeof value.id === 'string') {
           const event = session.ledger?.events.find(item => item.event_id === value.id);
-          if (event) await panel.webview.postMessage({ type: 'detail', event });
+          if (event) await panel.webview.postMessage({ type: 'detail', event, selection: value.id });
         } else if (value.type === 'change' && Number.isInteger(value.index)) {
           const change = session.comparison?.changes[value.index as number];
-          if (change) await panel.webview.postMessage({ type: 'detail', event: change.event, change });
+          if (change) await panel.webview.postMessage({ type: 'detail', event: change.event, change, selection: `change:${value.index}` });
         } else if (value.type === 'eventDiff' && Number.isInteger(value.index)) {
           const change = session.comparison?.changes[value.index as number];
           if (change) {
@@ -103,7 +113,8 @@ export class Viewer implements vscode.CustomReadonlyEditorProvider {
             await vscode.commands.executeCommand('vscode.diff', left, right, t('BAC event: {0}', change.event.event_id));
           }
         } else if (value.type === 'file' && typeof value.id === 'string' && typeof value.path === 'string') {
-          const changedEvent = Number.isInteger(value.changeIndex) ? session.comparison?.changes[value.changeIndex as number]?.event : undefined;
+          const change = Number.isInteger(value.changeIndex) ? session.comparison?.changes[value.changeIndex as number] : undefined;
+          const changedEvent = change ? session.side === 'before' ? change.before ?? change.event : change.event : undefined;
           const candidates = changedEvent ? [changedEvent] : session.ledger?.events ?? [];
           const event = candidates.find(item => item.event_id === value.id && this.filePaths(item).includes(value.path as string));
           if (event && ['open', 'worktree', 'staged', 'recorded'].includes(String(value.action))) await this.openFile(session, event, value.path, String(value.action));
@@ -131,18 +142,50 @@ export class Viewer implements vscode.CustomReadonlyEditorProvider {
     let watchedRepository: GitRepository | undefined;
     let repositorySubscription: vscode.Disposable | undefined;
     session.watchSource = () => {
-      if (session.source?.mutable && session.source.repository && watchedRepository !== session.source.repository && !session.closed) {
+      const repository = session.source?.repository ?? session.peer?.source?.repository;
+      if ((session.source?.mutable || session.peer?.source?.mutable) && repository && watchedRepository !== repository && !session.closed) {
         repositorySubscription?.dispose();
-        watchedRepository = session.source.repository;
+        watchedRepository = repository;
         repositorySubscription = watchedRepository.state.onDidChange(gitChanged);
         subscriptions.push(repositorySubscription);
       }
     };
     session.watchSource();
+    subscriptions.push(vscode.window.tabGroups.onDidChangeTabs(() => this.schedulePairing()));
+    subscriptions.push(panel.onDidChangeViewState(() => this.schedulePairing()));
+    this.schedulePairing();
     subscriptions.push(vscode.workspace.onDidGrantWorkspaceTrust(changed), vscode.workspace.onDidChangeConfiguration(event => {
       if (event.affectsConfiguration('git.enabled')) changed();
     }));
 
+  }
+
+  // Stable VS Code exposes the two fallback diff panels as visible in the same
+  // column, but does not expose custom diff tab inputs. Pair only the unambiguous
+  // built-in SCM source combinations; independent editor groups never qualify.
+  private pairScmViews(): void {
+    const visible = [...this.sessions].filter(s => !s.closed && s.panel.visible && s.panel.viewColumn !== undefined && s.source);
+    for (const current of visible) {
+      if (current.peer) continue;
+      const group = visible.filter(s => s.panel.viewColumn === current.panel.viewColumn);
+      if (group.length !== 2) continue;
+      const target = group.find(s => s.uri.scheme === 'file') ?? group.find(s => s.source?.originalRef === '');
+      const baseline = group.find(s => s !== target);
+      if (!target || !baseline || !baseline.source?.root) continue;
+      const scm = target.uri.scheme === 'file' ? baseline.source.originalRef === '~'
+        : baseline.source.originalRef === 'HEAD';
+      if (!scm) continue;
+      const targetPath = target.source!.localUri.fsPath;
+      if (!inside(baseline.source.root, targetPath)) continue;
+      // Different paths are legitimate for SCM renames. Both sides still pass
+      // normal project/path validation and keep their own verification snapshots.
+      baseline.peer = target; baseline.side = 'before';
+      target.peer = baseline; target.side = 'after';
+      for (const session of group) {
+        session.watchSource?.();
+        void this.refresh(session).catch(error => this.error(session, error));
+      }
+    }
   }
 
   private async source(uri: vscode.Uri): Promise<DocumentSource> {
@@ -218,6 +261,7 @@ export class Viewer implements vscode.CustomReadonlyEditorProvider {
       session.generation++;
       const html = await this.html(session.panel.webview);
       if (!session.closed) session.panel.webview.html = html;
+
     }));
   }
 
@@ -234,11 +278,9 @@ export class Viewer implements vscode.CustomReadonlyEditorProvider {
       const bytes = await this.bytes(session.source);
       session.watchSource?.();
       if (session.closed || generation !== session.generation) return;
-      if ((bytes ? digest(bytes) : undefined) === session.ledger?.digest && label === session.source.label) return;
+      if (!session.peer && (bytes ? digest(bytes) : undefined) === session.ledger?.digest && label === session.source.label) return;
     } catch { /* Refresh reports unavailable Git resources inside this side. */ }
     if (!session.closed && generation === session.generation) {
-      session.verification = undefined;
-      await session.panel.webview.postMessage({ type: 'verification' });
       await this.refresh(session);
     }
   }
@@ -253,6 +295,9 @@ export class Viewer implements vscode.CustomReadonlyEditorProvider {
       const bytes = await this.bytes(session.source);
       session.watchSource?.();
       const ledger = bytes ? await readLedger(bytes) : undefined;
+      const peer = session.peer;
+      const otherBytes = peer?.source ? await this.bytes(peer.source) : undefined;
+      const other = otherBytes ? await readLedger(otherBytes) : undefined;
       if (generation !== session.generation) return;
       if (session.ledger?.digest !== ledger?.digest) session.verification = undefined;
       session.ledger = ledger;
@@ -261,6 +306,14 @@ export class Viewer implements vscode.CustomReadonlyEditorProvider {
       session.panel.title = `${path.basename(session.source.localUri.fsPath)} · ${session.source.label}`;
       if (ledger) await this.postLedger(session);
       else await session.panel.webview.postMessage({ type: 'missing', name: path.basename(session.source.localUri.fsPath), source: session.source.label, trusted: vscode.workspace.isTrusted });
+      if (peer && !peer.closed && session.peer === peer) {
+        const before = session.side === 'before' ? ledger : other;
+        const after = session.side === 'after' ? ledger : other;
+        session.comparison = compareLedgers(before, after ?? { manifest: before?.manifest ?? {}, events: [], digest: '' });
+        await session.panel.webview.postMessage({ type: 'comparison', native: true, side: session.side,
+          label: `${session.side === 'before' ? session.source.label : peer.source!.label} → ${session.side === 'after' ? session.source.label : peer.source!.label}`,
+          missingBaseline: !before, missingTarget: !after, comparison: session.comparison });
+      }
     } catch (error) {
       if (generation !== session.generation) return;
       session.ledger = undefined;

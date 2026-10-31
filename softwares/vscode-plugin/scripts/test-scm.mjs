@@ -72,7 +72,19 @@ try {
   await page.screenshot({ path: path.join(output, 'after-scm.jpg'), type: 'jpeg', quality: 85 });
   async function viewerFrames() {
     const result = [];
-    for (const frame of page.frames()) if (await frame.locator('#source').count()) result.push(frame);
+    for (const frame of page.frames()) {
+      if (!await frame.locator('#source').count()) continue;
+      // Background tabs can retain webviews with nonzero layout bounds. Check
+      // every embedding iframe so they cannot be mistaken for a visible side.
+      let visible = true;
+      for (let current = frame; current.parentFrame(); current = current.parentFrame()) {
+        if (!await (await current.frameElement()).isVisible()) { visible = false; break; }
+      }
+      if (!visible) continue;
+      const box = await (await frame.frameElement()).boundingBox();
+      const viewport = page.viewportSize();
+      if (box && box.width > 0 && box.height > 0 && box.x + box.width > 0 && box.y + box.height > 0 && box.x < viewport.width && box.y < viewport.height) result.push(frame);
+    }
     return result;
   }
   async function assertViews(expected, absent = false) {
@@ -92,13 +104,33 @@ try {
     }
     throw new Error(`Expected SCM counts ${JSON.stringify(expected)}, absent=${absent}`);
   }
+  async function assertChanges(frames, expected) {
+    for (const frame of frames) {
+      const source = await frame.locator('#source').textContent();
+      if (expected[source] === undefined) continue;
+      await frame.locator('#changes-tab.active').waitFor();
+      await frame.locator('#results-label').filter({ hasText: `${expected[source]} changes` }).waitFor();
+      const count = await frame.locator('.event-row').count();
+      if (count !== expected[source]) throw new Error(`Expected only ${expected[source]} changes for ${source}, got ${count}`);
+      if (!expected[source]) await frame.locator('#detail h2').filter({ hasText: 'No changed events on this side.' }).waitFor();
+      await frame.locator('#compare-summary').filter({ hasText: /unchanged events hidden/ }).waitFor();
+    }
+  }
   const initial = await assertViews([3, 4]);
+  await assertChanges(initial, { Index: 0, 'Working tree': 1 });
+  const working = (await Promise.all(initial.map(async frame => await frame.locator('#source').textContent() === 'Working tree' ? frame : undefined))).find(Boolean);
+  await working.locator('#timeline-tab').click();
+  if (await working.locator('.event-row').count() !== 4) throw new Error('Full timeline must remain available.');
+  await working.locator('#changes-tab').click();
+  await assertChanges(initial, { Index: 0, 'Working tree': 1 });
+  await page.screenshot({ path: path.join(output, 'after-changes-only.jpg'), type: 'jpeg', quality: 85 });
   const sources = await Promise.all(initial.map(frame => frame.locator('#source').textContent()));
   if (!sources.includes('Index') || !sources.includes('Working tree')) throw new Error(`SCM sides did not render: ${JSON.stringify(sources)}`);
   await writeFile(path.join(output, 'scm-done'), 'done');
   await waitFile('staged-ready');
   await page.locator('.scm-view .monaco-list-row').filter({ hasText: 'contribution.bac' }).first().click();
   const staged = await assertViews([2, 3]);
+  await assertChanges(staged, { Index: 1 });
   for (const frame of staged) {
     await frame.locator('#verify').click();
     await frame.locator('#validation').filter({ hasText: /Verification passed|Verification warnings/ }).waitFor();

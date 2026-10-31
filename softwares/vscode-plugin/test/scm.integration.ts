@@ -202,7 +202,7 @@ function mockPanel() {
   const messages: any[] = [];
   const dispose = new vscode.EventEmitter<void>();
   const receive = new vscode.EventEmitter<unknown>();
-  const panel = { title: '', onDidDispose: dispose.event, webview: { options: {}, html: '', cspSource: 'test', asWebviewUri: (uri: vscode.Uri) => uri, onDidReceiveMessage: receive.event, postMessage: async (message: unknown) => { messages.push(message); return true; } } } as unknown as vscode.WebviewPanel;
+  const panel = { title: '', onDidDispose: dispose.event, onDidChangeViewState: new vscode.EventEmitter<vscode.WebviewPanelOnDidChangeViewStateEvent>().event, webview: { options: {}, html: '', cspSource: 'test', asWebviewUri: (uri: vscode.Uri) => uri, onDidReceiveMessage: receive.event, postMessage: async (message: unknown) => { messages.push(message); return true; } } } as unknown as vscode.WebviewPanel;
   return { panel, messages, dispose, receive };
 }
 

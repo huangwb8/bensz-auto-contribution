@@ -10,8 +10,8 @@ cd /docker/bensz-auto-contribution; docker-compose pull; docker-compose down; do
 
 ```
 github项目：huangwb8/bensz-auto-contribution
-repo-version=1.3.6
-vscode-version=0.1.2
+repo-version=1.3.7
+vscode-version=0.1.3
 请：
  - git-commit skill保存变更; 仅用1个commit； 新增 tag 为 v{repo-version}，并且该commit信息要提到更新版本,并且体现的是这个版本与上一个版本之间的所有变化；
  - git-publish-release skill 发布为一个release到github仓库

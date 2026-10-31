@@ -13,7 +13,7 @@ export async function run(): Promise<void> {
     const messages: any[] = [];
     const dispose = new vscode.EventEmitter<void>(); disposals.push(dispose);
     const receive = new vscode.EventEmitter<unknown>();
-    const panel = { title: '', onDidDispose: dispose.event, webview: { cspSource: 'test', asWebviewUri: (uri: vscode.Uri) => uri, onDidReceiveMessage: receive.event, postMessage: async (message: unknown) => { messages.push(message); return true; } } } as unknown as vscode.WebviewPanel;
+    const panel = { title: '', onDidDispose: dispose.event, onDidChangeViewState: new vscode.EventEmitter<vscode.WebviewPanelOnDidChangeViewStateEvent>().event, webview: { cspSource: 'test', asWebviewUri: (uri: vscode.Uri) => uri, onDidReceiveMessage: receive.event, postMessage: async (message: unknown) => { messages.push(message); return true; } } } as unknown as vscode.WebviewPanel;
     await viewer.resolveCustomEditor(await viewer.openCustomDocument(resource), panel);
     const session = [...viewer['sessions']].at(-1)!;
     await viewer['refresh'](session);

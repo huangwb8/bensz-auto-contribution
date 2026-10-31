@@ -15,6 +15,8 @@
   const eventNames = { genesis: t('Ledger created'), session_started: t('Session started'), human_instruction: t('Human instruction'), human_review: t('Human review'), human_approval: t('Human approval'), ai_plan: t('AI plan'), ai_generation: t('AI generation'), tool_command: t('Tool execution'), file_snapshot: t('File snapshot'), file_change: t('File change'), test_result: t('Test result'), checkpoint: t('Checkpoint'), verification: t('Verification') };
   let ledger;
   let comparison;
+  let diffSide;
+  let nativeDiff = false;
   let tab = 'timeline';
   let source = 'all';
   let selected;
@@ -46,29 +48,35 @@
   function filters() {
     $('sources').replaceChildren();
     for (const key of ['all', 'human', 'ai', 'tool', 'system']) {
-      const count = ledger ? ledger.events.filter(e => key === 'all' || e.source_type === key).length : 0;
+      const count = items().filter(item => key === 'all' || item.event.source_type === key).length;
       const button = node('button', `source-filter${source === key ? ' active' : ''}`, `${key === 'all' ? t('All') : names[key]} ${count}`);
       button.setAttribute('aria-pressed', String(source === key));
       button.addEventListener('click', () => { source = key; pageSize = 100; filters(); render(); save(); });
       $('sources').append(button);
     }
   }
+  function items() {
+    if (tab === 'timeline') return (ledger?.events || []).slice().reverse().map(event => ({ event }));
+    return (comparison?.changes || []).map((change, index) => {
+      const event = diffSide === 'before' ? change.before || change.event : change.event;
+      return { event: { ...event, summary: event.payload?.summary, files: (Array.isArray(event.payload?.files) ? event.payload.files : []).filter(f => f && typeof f.path === 'string').map(f => f.path) }, change, index };
+    }).filter(item => !diffSide || (diffSide === 'before' ? item.change.oldIndex !== undefined : item.change.newIndex !== undefined));
+  }
   function rows() {
-    if (!ledger) return [];
-    const items = tab === 'timeline' ? [...ledger.events].reverse().map(event => ({ event })) : (comparison?.changes || []).map((change, index) => ({ event: { ...change.event, summary: change.event.payload?.summary, files: (Array.isArray(change.event.payload?.files) ? change.event.payload.files : []).filter(f => f && typeof f.path === 'string').map(f => f.path) }, change, index }));
     const query = $('search').value.toLocaleLowerCase();
-    return items.filter(item => (source === 'all' || item.event.source_type === source) && [item.event.summary, item.event.event_type, item.event.event_id, ...(item.event.files || [])].map(str).join(' ').toLocaleLowerCase().includes(query));
+    return items().filter(item => (source === 'all' || item.event.source_type === source) && [item.event.summary, item.event.event_type, item.event.event_id, ...(item.event.files || [])].map(str).join(' ').toLocaleLowerCase().includes(query));
   }
   function render() {
     const items = rows();
     $('results-label').textContent = `${items.length} ${tab === 'timeline' ? t('events · newest first') : t('changes')}`;
     $('events').replaceChildren();
-    if (!items.length) $('events').append(node('p', 'no-results', tab === 'changes' && !comparison ? t('Click “Compare ledger” to read the Git versions.') : t('No matching events.')));
+    if (!items.length) $('events').append(node('p', 'no-results', tab === 'changes' && !comparison ? t('Click “Compare ledger” to read the Git versions.') : nativeDiff && tab === 'changes' && !thisSideChanges() ? t('No changed events on this side.') : t('No matching events.')));
     for (const item of items.slice(0, pageSize)) {
       const event = item.event;
       const key = item.change ? `change:${item.index}` : event.event_id;
       const button = node('button', `event-row${selected === key ? ' selected' : ''}`);
       button.dataset.source = event.source_type;
+      if (item.change) button.dataset.change = item.change.kind;
       button.dataset.eventId = event.event_id;
       button.setAttribute('role', 'listitem');
       const top = node('div', 'row-top');
@@ -87,9 +95,14 @@
     $('timeline-tab').classList.toggle('active', next === 'timeline');
     $('changes-tab').classList.toggle('active', next === 'changes');
     $('git-controls').hidden = next !== 'changes';
-    pageSize = 100; render();
+    $('baseline').hidden = nativeDiff;
+    document.querySelector('label[for=baseline]').hidden = nativeDiff;
+    $('compare').hidden = nativeDiff;
+    pageSize = 100; filters(); render();
   }
+  function thisSideChanges() { return (comparison?.changes || []).filter(c => !diffSide || (diffSide === 'before' ? c.oldIndex !== undefined : c.newIndex !== undefined)).length; }
   function details(event, change) {
+    if (diffSide === 'before' && change?.before) event = change.before;
     $('detail').replaceChildren();
     const head = node('div', 'detail-head');
     head.dataset.source = event.source_type;
@@ -146,7 +159,7 @@
     if (data.type === 'busy') notice(data.text);
     if (data.type === 'error') notice(data.message, true);
     if (data.type === 'loadError' || data.type === 'missing') {
-      ledger = undefined; comparison = undefined; verification(undefined); filters(); render();
+      ledger = undefined; comparison = undefined; diffSide = undefined; nativeDiff = false; verification(undefined); filters(); render();
       $('filename').textContent = data.name; $('source').textContent = data.source;
       $('verify').disabled = true; $('compare').disabled = !data.trusted;
       $('compare-summary').textContent = t('Select a range to view event changes');
@@ -159,7 +172,10 @@
       } else notice(data.message + ' ' + t('Enable Git, trust the project, and refresh. Missing versions and damaged containers are reported separately.'), true);
     }
     if (data.type === 'ledger') {
-      ledger = data.ledger; comparison = undefined; trusted = data.trusted; historical = data.historical;
+      const wasNative = nativeDiff;
+      ledger = data.ledger; comparison = undefined; diffSide = undefined; nativeDiff = false;
+      if (wasNative) setTab('timeline');
+      trusted = data.trusted; historical = data.historical;
       source = restored.source && ['all', 'human', 'ai', 'tool', 'system'].includes(restored.source) ? restored.source : source;
       $('filename').textContent = data.name; $('source').textContent = data.source; $('count').textContent = t('{0} events', ledger.count);
       $('head').textContent = t('Ledger head {0}', str(ledger.events.at(-1)?.hash).replace('sha256:', '').slice(0, 16));
@@ -172,17 +188,26 @@
       if (event) { selected = event.event_id; post('event', { id: event.event_id }); render(); }
       restored = {};
     }
-    if (data.type === 'detail') details(data.event, data.change);
+    if (data.type === 'detail' && data.selection === selected) details(data.event, data.change);
     if (data.type === 'comparison') {
       comparison = data.comparison;
-      $('baseline').value = data.mode;
+      nativeDiff = !!data.native; diffSide = nativeDiff ? data.side : undefined;
+      if (data.mode) $('baseline').value = data.mode;
       const counts = {};
       for (const change of comparison.changes) counts[change.kind] = (counts[change.kind] || 0) + 1;
       const summary = Object.entries(kinds).map(([key, name]) => `${name} ${counts[key] || 0}`).join(' · ');
       $('compare-summary').textContent = t('{0} · {1} → {2} events · {3}', data.label, comparison.beforeCount, comparison.afterCount, summary);
       notice(data.missingTarget ? data.missingBaseline ? t('Neither Git version contains this ledger.') : t('The target Git version deleted this ledger. Removed events are shown below.') : comparison.projectChanged ? t('The project binding changed. Check whether the ledgers belong to the same project.') : comparison.manifestChanged ? t('The container manifest changed. Inspect the event JSON and run full verification.') : data.missingBaseline ? t('The baseline has no ledger. All current events are shown as added.') : comparison.appendOnly ? comparison.changes.length ? t('The history prefix is preserved and events are appended. Run verification to check integrity.') : t('The ledger matches the baseline.') : t('History includes modifications, deletions, insertions or reordering. Inspect the changes and run verification.'), comparison.projectChanged || !comparison.appendOnly);
       setTab('changes');
-      if (comparison.changes.length) { selected = 'change:0'; render(); post('change', { index: 0 }); }
+      if (nativeDiff) {
+        const changedIds = new Set(items().map(item => item.event.event_id));
+        $('compare-summary').textContent += ' · ' + t('{0} unchanged events hidden', Math.max(0, (ledger?.count || 0) - changedIds.size));
+      }
+      selected = undefined;
+      $('detail').replaceChildren(node('h2', '', t(nativeDiff ? 'No changed events on this side.' : 'No event changes.')), node('p', 'note', t('Use the contribution timeline to explore the full history.')));
+      const first = rows()[0];
+      if (first) { selected = `change:${first.index}`; post('change', { index: first.index }); }
+      render();
     }
     if (data.type === 'verification') { verification(data.report); notice(data.report ? t('Verification complete. Results apply to {0}.', data.report.source || $('source').textContent) : t('The ledger changed. Previous verification results are no longer valid.')); }
   });

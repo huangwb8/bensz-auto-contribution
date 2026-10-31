@@ -4,7 +4,7 @@
 
 插件源码和包配置位于 `softwares/vscode-plugin`。版本以该目录的 `package.json` 为准，与根目录 Python 包版本独立。用户指定发布版本时先同步插件版本；未指定时使用现有版本，不自动升级。
 
-本次目标版本为 `0.1.2`，发布者 ID 为 `bensz`，插件 ID 为 `bensz.bac-viewer`。版本与发布状态分别核对；本地打包不代表已经上传或公开上架。
+本次目标版本为 `0.1.3`，发布者 ID 为 `bensz`，插件 ID 为 `bensz.bac-viewer`。版本与发布状态分别核对；本地打包不代表已经上传或公开上架。
 
 ## 默认发布流程
 
@@ -15,6 +15,10 @@
 ## 账号与凭据
 
 人类使用拥有 `bensz` 发布权限的 Microsoft 账号登录 [Marketplace 发布管理页](https://marketplace.visualstudio.com/manage)，完成验证码、MFA 和上传。AI 提供 VSIX 路径、版本与 SHA-256，不接管浏览器登录会话。密码、Cookie、登录状态和其它凭据不写入 Git、文档、BAC、VSIX 或发布证据。
+
+## 打包工具依赖
+
+`package.json` 对 `@vscode/vsce` 的 `minimatch` 定向使用 `11.0.1+`，用于修复上游依赖范围尚未覆盖的 glob 模式放大拒绝服务告警（[GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249)）。该依赖只用于本地打包，不进入插件运行包；修改覆盖规则后需重跑 `npm ci`、`npm test`、`npm run package` 和 VSIX 内容检查。
 
 ## 本地检查
 
@@ -34,6 +38,8 @@ npm run package
 当前界面验证记录位于 `docs/plans/2026-10-03-vscode-bac-viewer.md`。需要重验实际桌面交互时执行 `npm run test:vscode`；该测试默认使用 macOS VS Code 路径，其它路径通过 `BAC_VSCODE_EXECUTABLE` 指定。不要把 macOS 验证结果描述为 Windows／Linux 验证。
 
 ## 上传已检查的 VSIX
+
+本次上传文件为 `softwares/vscode-plugin/dist/bac-viewer-0.1.3.vsix`。在仓库根目录可用 `shasum -a 256 softwares/vscode-plugin/dist/bac-viewer-0.1.3.vsix` 核对 AI 提供的摘要；不要误选旧版本文件。
 
 1. 人类打开官方管理页，确认当前账号拥有目标发布者权限。
 2. 选择 `bensz` 发布者与 `bac-viewer` 插件，在更多操作中选择 **Update**；首次发布使用创建扩展入口。
