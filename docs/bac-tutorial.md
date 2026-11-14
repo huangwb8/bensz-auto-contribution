@@ -288,13 +288,19 @@ bac verify --require-anchor
 项目上下文，用于把事件绑定到具体项目。它不是完整项目快照，而是记录关键上下文：
 
 - `root_path`：项目根路径。若在 git 仓库内运行，优先使用 git 仓库根目录
-- `root_hash`：基于 `root_path` 和 `git_remote` 计算出的项目绑定 hash
+- `root_hash`：genesis 初始化时基于 `root_path` 和 `git_remote` 计算，后续事件沿用的稳定项目绑定 hash；不会随 origin 更新而重新计算
 - `git_remote`：当前仓库的 `remote.origin.url`，不存在时为 `null`
 - `git_commit`：当前 `HEAD` commit，不在 git 仓库或无 commit 时为 `null`
 - `git_branch`：当前分支名，不存在时为 `null`
 - `worktree_dirty`：运行时工作区是否有未提交改动
 
 验证器会要求同一个 `.bac` 文件里的 `project.root_hash` 保持一致，从而发现账本被混入其它项目事件的情况。
+
+CLI 的普通追加、人类输入与日志导入、配置、checkpoint 和 repair 记录都会显式沿用既有绑定，同时采集当时的 remote、commit、branch 和工作区状态。低层 Python 调用 `build_record_event`、`build_human_input_event` 或 `build_anchor_checkpoint_event` 时，应传入已验证账本末条事件的 `project`，即 `project_binding=events[-1]["project"]`；不传该参数时仍采集当前上下文，但追加器会拒绝不一致的候选，不会静默改写事件 hash。替换前会完整验证候选容器和事件链，错误保留事件定位并阻止落盘，warning 不阻止写入。
+
+项目目录变化后，普通写入会提示先运行 `bac --root /path/to/new-root project rebind --json`；自定义账本同时指定全局 `--bac-file`。该命令先验证现有账本，再追加 `verification` / `source_type=system` / `trust_level=observed` 事件，其 `payload.project_rebinding` 包含 `format=bac.project_rebinding.v1`、`from_root_path` 和 `to_root_path`。新事件保留原 `root_hash`，记录新 `root_path` 及当前 Git 上下文；旧事件与 manifest 的内容、hash 均不变。路径已一致时返回 `unchanged`，不追加事件。命令不自动请求远程锚定；如需锚定本次重绑定，再运行 `bac anchor push`。
+
+重绑定是对本地账本位置的显式接受，不是人类身份认证，也不证明两个目录的内容确实属于同一项目。调用方需确认目标账本与项目关系；不得为了消除 fail 而把无关项目混为一体。已有多个 `root_hash` 的账本仍会被拒绝，不能通过本命令或 `repair stale-tail` 无痕修复；应保留原件、原始事件 hash 和外部 receipt，单独审查恢复方案。
 
 `actor`
 

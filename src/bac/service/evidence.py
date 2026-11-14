@@ -10,7 +10,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
-from bac.core.hash_chain import hash_json, sha256_digest
+from bac.core.hash_chain import hash_json, is_sha256, sha256_digest
 from bac.core.intent import MAX_INTENT_SUMMARY_LENGTH
 from bac.service.redaction import redact_data
 
@@ -26,7 +26,9 @@ MAX_HUMAN_INPUT_PREVIEW_LENGTH = 96
 MAX_HUMAN_INPUT_EXCERPT_LENGTH = 240
 
 
-def collect_project_context(root: Path) -> dict[str, Any]:
+def collect_project_context(
+    root: Path, project_binding: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     repo_root = _git(root, "rev-parse", "--show-toplevel") or str(root.resolve())
     root_path = str(Path(repo_root).resolve())
     git_remote = _git(root, "config", "--get", "remote.origin.url")
@@ -35,6 +37,14 @@ def collect_project_context(root: Path) -> dict[str, Any]:
     dirty = bool(_git(root, "status", "--porcelain"))
 
     root_hash = hash_json({"root_path": root_path, "git_remote": git_remote})
+    if project_binding is not None:
+        if not is_sha256(project_binding.get("root_hash")):
+            raise ValueError("project binding requires a valid root_hash")
+        if project_binding.get("root_path") != root_path:
+            raise ValueError("project root changed; run bac --root <new-root> project rebind before writing")
+        # The genesis digest remains the ledger identity. Remote/commit/branch
+        # describe this observation and may change without changing identity.
+        root_hash = project_binding["root_hash"]
     return {
         "root_path": root_path,
         "root_hash": root_hash,

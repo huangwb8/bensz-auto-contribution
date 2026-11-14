@@ -4,6 +4,23 @@
 
 ## [Unreleased]
 
+## [1.3.8] - 2026-11-14
+
+### Fixed（修复）
+
+- 修复新项目初始化后添加或修改 Git origin 导致 `project.root_hash changed within ledger`：所有内部追加入口沿用账本既有项目标识，并继续记录当前 Git 上下文，保留有效旧账本和历史 hash。
+- 写入器在原子替换前完整验证候选容器与事件链，拒绝绑定漂移、非法来源、无效签名声明等错误；失败保留原文件，避免“写入成功后账本失效”。
+- 修复运行时版本仍硬编码为 `1.3.6` 的问题：`bac.__version__` 与新账本的 `tool_version` 读取包元数据，以 `pyproject.toml` 为发布版本来源；未安装元数据的源码环境标记为 `0+unknown`。
+
+### Added（新增）
+
+- 新增 `bac project rebind`：目录迁移后显式追加系统来源的路径重绑定记录，保留旧事件与 manifest；普通跨目录写入明确拒绝，既有故障账本不自动改写。同步中英文 README、教程及项目绑定回归测试。
+
+### Changed（变更）
+
+- Python 包更新至 `1.3.8`，VS Code 插件保持用户指定的 `0.1.3`；从本地发布 PyPI 与 Docker Hub，GitHub Release 使用 `v1.3.8`，同步发布模板与验证产物。
+- 扩展 VS Code Marketplace 网页更新教程，补充 Microsoft 账号与发布者选择、已有插件 Update 入口、macOS 文件定位、VSIX 身份与版本核对，以及上传提交、本机安装和商店公开状态的逐步确认。
+
 ## [1.3.7] - 2026-10-31
 
 ### Fixed（修复）

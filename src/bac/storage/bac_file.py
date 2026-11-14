@@ -274,6 +274,9 @@ def _validate_rewritten_container(path: Path, *, expected_events: int) -> None:
     events = read_events(path)
     if len(events) != expected_events:
         raise ValueError(f"rewritten BAC container has {len(events)} events, expected {expected_events}")
+    report = verify_bac_file(path)
+    if report.errors:
+        raise ValueError(f"cannot write invalid BAC file: {'; '.join(report.errors)}")
 
 
 def _fsync_file(path: Path) -> None:

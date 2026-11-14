@@ -9,6 +9,7 @@ from typing import Any
 from bac.core.hash_chain import compute_event_hash, is_sha256
 from bac.core.verify import verify_bac_file, verify_events
 from bac.service.event_builder import build_record_event, default_actor
+from bac.service.evidence import collect_project_context
 from bac.storage.bac_file import append_event, read_events, rewrite_events_atomic
 
 
@@ -73,6 +74,10 @@ def repair_stale_tail(
         output["warnings"] = report.warnings
         return output
 
+    try:
+        collect_project_context(root, events[-1]["project"])
+    except ValueError as exc:
+        return _refused(base_output, str(exc), errors=report.errors)
     repaired_events = plan.pop("_repaired_events")
     _atomic_rewrite_events(bac_path, repaired_events)
     repaired_report = verify_bac_file(bac_path)
@@ -226,6 +231,7 @@ def _append_repair_record(root: Path, bac_path: Path, affected_events: list[dict
     summary = "Repaired stale BAC tail without changing attribution fields"
     event = build_record_event(
         root=root,
+        project_binding=events[-1]["project"],
         prev_event_hash=events[-1]["event_hash"],
         event_type="tool_command",
         source_type="tool",
@@ -250,6 +256,7 @@ def _append_repair_record(root: Path, bac_path: Path, affected_events: list[dict
 def _append_local_checkpoint(root: Path, bac_path: Path, repair_event: dict[str, Any]) -> dict[str, Any]:
     event = build_record_event(
         root=root,
+        project_binding=repair_event["project"],
         prev_event_hash=repair_event["event_hash"],
         event_type="checkpoint",
         source_type="system",

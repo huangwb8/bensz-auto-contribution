@@ -271,9 +271,14 @@ class BacCoreTests(unittest.TestCase):
     def test_repair_stale_tail_apply_appends_repair_record_and_checkpoint(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            subprocess.run(["git", "init"], cwd=root, check=True, capture_output=True)
             bac_file = root / "project.bac"
             original_events = _write_stale_tail_fixture(root, bac_file)
             stale_before = original_events[2]
+            subprocess.run(
+                ["git", "remote", "add", "origin", "https://example.invalid/project.git"],
+                cwd=root, check=True, capture_output=True,
+            )
 
             result = repair_stale_tail(root, bac_file, apply=True)
 
@@ -476,7 +481,7 @@ class BacCoreTests(unittest.TestCase):
             )
             signed["trust_level"] = "signed"
             signed = attach_event_hash(signed)
-            append_event(bac_file, signed)
+            _rewrite_bac_events(bac_file, [genesis, signed])
 
             report = verify_bac_file(bac_file)
 
@@ -498,7 +503,7 @@ class BacCoreTests(unittest.TestCase):
             )
             anchored["trust_level"] = "anchored"
             anchored = attach_event_hash(anchored)
-            append_event(bac_file, anchored)
+            _rewrite_bac_events(bac_file, [genesis, anchored])
 
             report = verify_bac_file(bac_file)
 
@@ -520,7 +525,7 @@ class BacCoreTests(unittest.TestCase):
             )
             checkpoint["trust_level"] = "anchored"
             checkpoint = attach_event_hash(checkpoint)
-            append_event(bac_file, checkpoint)
+            _rewrite_bac_events(bac_file, [genesis, checkpoint])
 
             report = verify_bac_file(bac_file)
 
@@ -542,7 +547,7 @@ class BacCoreTests(unittest.TestCase):
             )
             record["source_type"] = "human"
             record = attach_event_hash(record)
-            append_event(bac_file, record)
+            _rewrite_bac_events(bac_file, [genesis, record])
 
             report = verify_bac_file(bac_file)
 
@@ -564,7 +569,7 @@ class BacCoreTests(unittest.TestCase):
             )
             approval["source_type"] = "ai"
             approval = attach_event_hash(approval)
-            append_event(bac_file, approval)
+            _rewrite_bac_events(bac_file, [genesis, approval])
 
             report = verify_bac_file(bac_file)
 
@@ -586,7 +591,7 @@ class BacCoreTests(unittest.TestCase):
             )
             session["source_type"] = "human"
             session = attach_event_hash(session)
-            append_event(bac_file, session)
+            _rewrite_bac_events(bac_file, [genesis, session])
 
             report = verify_bac_file(bac_file)
 
@@ -608,7 +613,7 @@ class BacCoreTests(unittest.TestCase):
             )
             snapshot["source_type"] = "human"
             snapshot = attach_event_hash(snapshot)
-            append_event(bac_file, snapshot)
+            _rewrite_bac_events(bac_file, [genesis, snapshot])
 
             report = verify_bac_file(bac_file)
 
@@ -669,7 +674,7 @@ class BacCoreTests(unittest.TestCase):
                 summary="Approved missing event",
                 payload={"approves_event_hash": "sha256:" + "f" * 64},
             )
-            append_event(bac_file, approval)
+            _rewrite_bac_events(bac_file, [genesis, approval])
 
             report = verify_bac_file(bac_file)
 
@@ -1094,7 +1099,7 @@ class BacCoreTests(unittest.TestCase):
                 },
                 evidence=[],
             )
-            append_event(bac_file, event)
+            _rewrite_bac_events(bac_file, [genesis, event])
 
             report = verify_bac_file(bac_file)
 

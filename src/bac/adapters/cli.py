@@ -34,7 +34,7 @@ from bac.service.event_builder import (
     build_record_event,
     default_actor,
 )
-from bac.service.evidence import collect_intent_references, parse_prompt_log_blocks
+from bac.service.evidence import collect_intent_references, collect_project_context, parse_prompt_log_blocks
 from bac.service.redaction import redact_data
 from bac.service.repair import repair_stale_tail
 from bac.storage.bac_file import (
@@ -116,6 +116,12 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--require-anchor", action="store_true", help="fail unless a valid remote anchor receipt exists")
     verify.add_argument("--json", action="store_true", help="print machine-readable output")
     verify.set_defaults(func=_cmd_verify)
+
+    project = subparsers.add_parser("project", help="manage ledger project binding")
+    project_commands = project.add_subparsers(dest="project_command", required=True)
+    rebind = project_commands.add_parser("rebind", help="explicitly bind a relocated ledger to the current project root")
+    rebind.add_argument("--json", action="store_true", help="print machine-readable output")
+    rebind.set_defaults(func=_cmd_project_rebind)
 
     repair = subparsers.add_parser("repair", help="plan or apply constrained BAC ledger repairs")
     repair_subparsers = repair.add_subparsers(dest="repair_command", required=True)
@@ -265,6 +271,7 @@ def _cmd_record(args: argparse.Namespace) -> int:
         )
         event = build_record_event(
             root=root,
+            project_binding=events[-1]["project"],
             prev_event_hash=head_hash,
             event_type=args.event_type,
             source_type=args.source_type,
@@ -314,6 +321,7 @@ def _cmd_input_record(args: argparse.Namespace) -> int:
 
         draft = build_human_input_event(
             root=root,
+            project_binding=events[-1]["project"],
             prev_event_hash=head_hash,
             text=text,
             channel=args.channel,
@@ -398,6 +406,7 @@ def _cmd_input_import_log(args: argparse.Namespace) -> int:
                 raise ValueError("current BAC head is missing event_hash")
             event = build_human_input_event(
                 root=root,
+                project_binding=known_events[-1]["project"],
                 prev_event_hash=head_hash,
                 text=block["text"],
                 channel="prompt_log",
@@ -450,6 +459,41 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         for error in report.errors:
             print(f"error: {error}")
     return 0 if report.status in {"pass", "warn"} else 1
+
+
+def _cmd_project_rebind(args: argparse.Namespace) -> int:
+    root = Path(args.root).resolve()
+    bac_path = _bac_path(root, args.bac_file)
+    # Rebinding is an explicit local operation; never change old events or
+    # anchor automatically. The next normal write uses this event's root.
+    with locked_bac_file(bac_path):
+        report = verify_bac_file(bac_path)
+        if report.errors:
+            raise ValueError(f"cannot rebind invalid BAC file: {'; '.join(report.errors)}")
+        events = read_events(bac_path)
+        previous = events[-1]["project"]
+        current = collect_project_context(root)
+        if current["root_path"] == previous["root_path"]:
+            _print_output({"status": "unchanged", "head_hash": events[-1]["event_hash"]}, args.json)
+            return 0
+        current["root_hash"] = events[0]["project"]["root_hash"]
+        event = build_record_event(
+            root=root,
+            project_binding=current,
+            prev_event_hash=events[-1]["event_hash"],
+            event_type="verification",
+            source_type="system",
+            summary="Explicitly rebound ledger to relocated project root",
+            actor=default_actor("bac", "system_tool"),
+            payload={"project_rebinding": {
+                "format": "bac.project_rebinding.v1",
+                "from_root_path": previous["root_path"],
+                "to_root_path": current["root_path"],
+            }},
+        )
+        append_event(bac_path, event, lock=False)
+    _print_output({"status": "rebound", "event_id": event["event_id"], "head_hash": event["event_hash"]}, args.json)
+    return 0
 
 
 def _cmd_repair_stale_tail(args: argparse.Namespace) -> int:
@@ -618,6 +662,7 @@ def _cmd_cloud_link(args: argparse.Namespace) -> int:
     events = read_events(bac_path)
     if not events:
         raise FileNotFoundError(f"BAC file is empty or missing: {bac_path}")
+    _check_project_before_remote_write(root, bac_path, events)
     config = _bac_config(events)
     anchor_url = args.url or config.get("anchor.url")
     if not isinstance(anchor_url, str) or not anchor_url:
@@ -841,6 +886,7 @@ def _append_config_event(
 ) -> dict[str, Any]:
     event = build_record_event(
         root=root,
+        project_binding=events[-1]["project"],
         prev_event_hash=events[-1]["event_hash"],
         event_type="verification",
         source_type="system",
@@ -851,6 +897,13 @@ def _append_config_event(
     )
     append_event(bac_path, event, lock=lock)
     return event
+
+
+def _check_project_before_remote_write(root: Path, bac_path: Path, events: list[dict[str, Any]]) -> None:
+    report = verify_bac_file(bac_path)
+    if report.errors:
+        raise ValueError(f"cannot write invalid BAC file: {'; '.join(report.errors)}")
+    collect_project_context(root, events[-1]["project"])
 
 
 def _anchor_push_current(
@@ -864,6 +917,7 @@ def _anchor_push_current(
     events = read_events(bac_path)
     if not events:
         raise FileNotFoundError(f"BAC file is empty or missing: {bac_path}")
+    _check_project_before_remote_write(root, bac_path, events)
     config = _bac_config(events)
     anchor_url = config.get("anchor.url")
     if not isinstance(anchor_url, str) or not anchor_url:
@@ -952,6 +1006,7 @@ def _append_anchor_checkpoint(
         raise ValueError("; ".join(verification.errors))
     event = build_anchor_checkpoint_event(
         root=root,
+        project_binding=events[-1]["project"],
         prev_event_hash=head_hash,
         anchor_receipt=receipt,
         ledger_nonce=ledger_nonce,

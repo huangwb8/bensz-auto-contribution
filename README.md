@@ -161,6 +161,18 @@ bac repair stale-tail --json --apply      # apply only after review
 
 Routine writes use a per-ledger OS lock, rebuild a temporary container, verify it, and atomically replace the ledger. This protects normal concurrent `bac record` calls. `repair stale-tail` is deliberately narrow: it can rebase only a mechanically stale tail and refuses content/attribution changes, signed or anchored events, checkpoints, and non-tail breaks.
 
+### Project binding and directory moves
+
+The genesis `project.root_hash` is retained as the ledger's stable binding. Adding, changing, or removing Git `origin` updates the event context without changing this identity. Before replacing a ledger, the writer checks the complete candidate container and event chain; an invalid candidate leaves the original file unchanged.
+
+After moving or copying a project to a new root, explicitly accept the new location before recording more events:
+
+```bash
+bac --root /path/to/moved-project project rebind --json
+```
+
+For a custom ledger, also pass the same global `--bac-file` option. Rebinding appends a `verification` event with `source_type=system` and the old/new root paths; it preserves the genesis, manifest, and all prior event hashes. It records an explicit local operation, not authenticated project ownership. Ordinary writes from a different root are rejected. A ledger already containing inconsistent root hashes still fails verification: upgrading or rebinding cannot repair its history. Keep the original for a separate recovery review; `repair stale-tail` does not repair project identity drift.
+
 ### Optional private anchors
 
 `bac init` defaults to local-first `hybrid` mode. A request sends a blinded `anchor_hash` (and, when configured, a low-sensitivity client summary), not `.bac` contents, paths, diffs, prompts, actors, project names, or the raw head hash.

@@ -161,6 +161,18 @@ bac repair stale-tail --json --apply      # 审阅计划后再应用
 
 日常写入使用单账本 OS 锁，在锁内读取最新 head、重建临时容器、验证后原子替换，保护并发 `bac record`。`repair stale-tail` 是严格受限的维护命令：只允许修复机械性尾部分叉，拒绝内容/归因修改、signed 或 anchored 事件、checkpoint 以及非尾部断链。
 
+### 项目绑定与目录迁移
+
+账本沿用 genesis 中的 `project.root_hash` 作为稳定绑定。添加、修改或移除 Git `origin` 只更新事件上下文，不改变该标识。写入器在替换前完整验证候选容器与事件链；校验出错时保留原文件。
+
+项目移动或复制到新目录后，先显式接受新位置，再继续记录：
+
+```bash
+bac --root /path/to/moved-project project rebind --json
+```
+
+自定义账本路径需同时传入原有全局参数 `--bac-file`。重绑定会追加 `source_type=system` 的 `verification` 事件，记录旧路径和新路径，保留 genesis、manifest 及全部历史事件 hash；它记录显式本地操作，不证明项目所有权或身份真实性。普通写入遇到目录不一致会被拒绝。已混入不同 root_hash 的故障账本仍会校验失败，升级或重绑定不会修复其历史；应保留原件并单独审查恢复方案，`repair stale-tail` 也不适用于此类故障。
+
 ### 可选的隐私保护锚定
 
 `bac init` 默认是本地优先的 `hybrid` 模式。请求只发送盲化 `anchor_hash`（可选低敏 client summary），不上传 `.bac` 内容、路径、diff、prompt、actor、项目名或原始 head hash。

@@ -24,7 +24,7 @@ from bac.core.canonicalize import canonical_bytes
 from bac.core.verify import verify_bac_file
 from bac.adapters import cli
 from bac.service.event_builder import build_anchor_checkpoint_event, build_genesis_event, build_record_event
-from bac.storage.bac_file import append_event, initialize_bac_file
+from bac.storage.bac_file import DEFAULT_BAC_FILE, append_event, initialize_bac_file, read_events
 
 
 class AnchorCoreTests(unittest.TestCase):
@@ -122,6 +122,7 @@ class AnchorCoreTests(unittest.TestCase):
     def test_cli_anchor_request_import_and_require_anchor(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            subprocess.run(["git", "init"], cwd=root, check=True, capture_output=True)
             env = dict(os.environ)
             env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1] / "src")
             _run_cli(root, env, "init", "--mode", "hybrid", "--json")
@@ -142,6 +143,10 @@ class AnchorCoreTests(unittest.TestCase):
             request = _run_cli(root, env, "anchor", "request", "--json")
             request_payload = json.loads(request.stdout)
             self.assertNotIn("head_hash", request_payload)
+            subprocess.run(
+                ["git", "remote", "add", "origin", "https://example.invalid/project.git"],
+                cwd=root, check=True, capture_output=True,
+            )
 
             private_key = Ed25519PrivateKey.generate()
             public_key_b64 = base64.b64encode(
@@ -169,6 +174,42 @@ class AnchorCoreTests(unittest.TestCase):
             self.assertEqual(report["anchor_status"], "receipt_valid")
             self.assertTrue(any("human contributions may be underrecorded" in warning for warning in report["warnings"]))
             self.assertEqual(head_hash, report["anchored_head_hashes"][-1])
+
+    def test_cloud_link_after_origin_update_preserves_binding(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.run(["git", "init"], cwd=root, check=True, capture_output=True)
+            bac_file = root / DEFAULT_BAC_FILE
+            genesis = build_genesis_event(root)
+            initialize_bac_file(bac_file, genesis)
+            subprocess.run(
+                ["git", "remote", "add", "origin", "https://example.invalid/project.git"],
+                cwd=root, check=True, capture_output=True,
+            )
+            private_key = Ed25519PrivateKey.generate()
+            public_key_b64 = base64.b64encode(
+                private_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+            ).decode("ascii")
+
+            def anchor_response(_url, request, **_kwargs):
+                return _signed_receipt(private_key, request["anchor_hash"])
+
+            with (
+                patch.object(cli, "_post_cloud_json", return_value={"ledger_id": "test-ledger"}),
+                patch.object(cli, "_post_anchor_request", side_effect=anchor_response),
+                patch.object(cli, "_fetch_public_key", return_value=public_key_b64),
+            ):
+                code = cli.main([
+                    "--root", str(root), "cloud", "link", "--url", "http://127.0.0.1:8000",
+                    "--token", "test-token", "--allow-insecure-anchor-url", "--json",
+                ])
+
+            self.assertEqual(code, 0)
+            self.assertEqual(verify_bac_file(bac_file, require_anchor=True).errors, [])
+            events = read_events(bac_file)
+            self.assertEqual(len(events), 3)
+            self.assertEqual({event["project"]["root_hash"] for event in events}, {genesis["project"]["root_hash"]})
+            self.assertTrue(all(event["project"]["git_remote"] == "https://example.invalid/project.git" for event in events[1:]))
 
     def test_cli_verify_enforces_anchor_require_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

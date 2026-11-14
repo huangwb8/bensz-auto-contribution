@@ -76,6 +76,7 @@ def build_record_event(
     payload: dict[str, Any] | None = None,
     evidence: list[dict[str, Any]] | None = None,
     references: list[dict[str, Any]] | None = None,
+    project_binding: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     trust = trust_level or _default_trust(event_type, source_type)
     event_payload = dict(payload or {})
@@ -111,6 +112,7 @@ def build_record_event(
         payload=event_payload,
         evidence=event_evidence,
         actor=actor or default_actor(source_type, source_type),
+        project_binding=project_binding,
     )
 
 
@@ -123,6 +125,7 @@ def build_anchor_checkpoint_event(
     anchor_public_key: str,
     summary: str = "Remote anchor checkpoint",
     actor: dict[str, Any] | None = None,
+    project_binding: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return build_record_event(
         root=root,
@@ -132,6 +135,7 @@ def build_anchor_checkpoint_event(
         summary=summary,
         trust_level="anchored",
         actor=actor or default_actor("bac", "system_tool"),
+        project_binding=project_binding,
         payload={
             "anchor": {
                 "format": "bac.anchor.checkpoint.v1",
@@ -160,6 +164,7 @@ def build_human_input_event(
     summary: str | None = None,
     summary_source: str | None = None,
     references: list[dict[str, Any]] | None = None,
+    project_binding: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     summary, payload, evidence = build_human_input_evidence(
         text=text,
@@ -186,6 +191,7 @@ def build_human_input_event(
         payload=payload,
         evidence=evidence,
         references=references,
+        project_binding=project_binding,
     )
 
 
@@ -199,6 +205,7 @@ def build_event(
     payload: dict[str, Any],
     actor: dict[str, Any],
     evidence: list[dict[str, Any]] | None = None,
+    project_binding: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     _validate_builder_input(event_type, source_type, trust_level)
     redacted_payload, payload_redactions = redact_data(payload)
@@ -211,7 +218,7 @@ def build_event(
         "source_type": source_type,
         "trust_level": trust_level,
         "created_at": utc_now(),
-        "project": collect_project_context(root),
+        "project": collect_project_context(root, project_binding),
         "actor": actor,
         "payload": redacted_payload,
         "evidence": redacted_evidence,

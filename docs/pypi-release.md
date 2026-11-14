@@ -5,6 +5,7 @@
 ## 前置条件
 
 - 包版本号以 `pyproject.toml` 为唯一来源。
+- `bac.__version__` 和新账本的 `tool_version` 从已安装的包元数据读取；直接运行尚未安装包元数据的源码时使用 `0+unknown`，不声明具体发布版本。
 - GitHub Release tag 必须使用 `vX.Y.Z`，并与 `pyproject.toml` 一致，例如 `v1.2.0`。
 - 需要在 PyPI 为本项目配置 Trusted Publishing：
   - Owner：`huangwb8`

@@ -6,6 +6,8 @@
 
 本次目标版本为 `0.1.3`，发布者 ID 为 `bensz`，插件 ID 为 `bensz.bac-viewer`。版本与发布状态分别核对；本地打包不代表已经上传或公开上架。
 
+2026-11-14 发布检查时，官方 Gallery API 已返回公开版本 `0.1.3`，本机 CLI 也列出 `bensz.bac-viewer@0.1.3`。本轮按指定版本重新准备 VSIX，不重复上传或覆盖商店已有版本。下方教程保留给尚未发布的目标版本使用；若要发布新的插件内容，需要另行指定一个未发布的版本号。
+
 ## 默认发布流程
 
 按根目录 `AGENTS.md`：AI 完成本地检查与打包 → 人类在官方 Marketplace 网页手动上传 → 确认提交成功后在本机安装同一 VSIX → 核对商店公开版本。
@@ -39,13 +41,52 @@ npm run package
 
 ## 上传已检查的 VSIX
 
-本次上传文件为 `softwares/vscode-plugin/dist/bac-viewer-0.1.3.vsix`。在仓库根目录可用 `shasum -a 256 softwares/vscode-plugin/dist/bac-viewer-0.1.3.vsix` 核对 AI 提供的摘要；不要误选旧版本文件。
+以下步骤用于更新已有的 `bensz.bac-viewer`，通过网页上传 VSIX 即可，无需为此配置 PAT 或 Azure DevOps。首次发布新插件时才使用创建扩展入口。
 
-1. 人类打开官方管理页，确认当前账号拥有目标发布者权限。
-2. 选择 `bensz` 发布者与 `bac-viewer` 插件，在更多操作中选择 **Update**；首次发布使用创建扩展入口。
-3. 选择 AI 提供的 `dist/bac-viewer-<插件版本>.vsix`，核对插件 ID 与目标版本，再点击 **Upload**。
-4. 检查网页成功／失败响应及管理页实际版本与处理状态，将结果告知 AI；仅点击按钮或页面跳转不能作为上传成功证据。
-5. 若目标版本已存在，先核对远端内容与本地包，不删除已有版本或自行递增版本；上传失败先处理错误。
+### 打开发布管理页
+
+1. 打开 [Marketplace 发布管理页](https://marketplace.visualstudio.com/manage)。
+2. 使用之前发布插件、拥有目标发布者权限的 **Microsoft 账号**登录，按提示完成验证码或 MFA。
+3. 在发布者列表中选择 **`bensz`**。如果看不到该发布者，先检查是否登录了正确账号及该账号是否拥有发布权限。
+
+### 选择已有插件
+
+4. 找到 **BAC Contribution Ledger**，核对插件 ID 为 **`bensz.bac-viewer`**。
+5. 打开该插件的操作菜单，选择 **Update**（更新）。沿用已有插件和发布者，不要创建新插件或修改身份。
+
+### 选择并核对 VSIX
+
+6. 选择本次经过检查的 `softwares/vscode-plugin/dist/bac-viewer-0.1.3.vsix`。后续发布时，以 `package.json` 中的目标版本及 AI 提供的已检查产物为准，不要误选旧文件。
+
+   在 macOS 文件选择窗口中可按 **⌘⇧G**，粘贴当前项目下的 `softwares/vscode-plugin/dist/` 完整路径，再选择文件。本机当前路径为：
+
+   ```text
+   /Volumes/2T01/Github/bensz-auto-contribution/softwares/vscode-plugin/dist/
+   ```
+
+   换设备或移动仓库后，应使用新的项目路径。在仓库根目录可以执行以下命令核对 AI 提供的 SHA-256：
+
+   ```bash
+   shasum -a 256 softwares/vscode-plugin/dist/bac-viewer-0.1.3.vsix
+   ```
+
+7. 上传前核对目标和所选文件：
+
+   | 项目 | 本次正确值 |
+   |---|---|
+   | 发布者 | `bensz` |
+   | 插件 | `bac-viewer` |
+   | 插件 ID | `bensz.bac-viewer` |
+   | 新版本 | `0.1.3` |
+   | 文件 | `bac-viewer-0.1.3.vsix` |
+
+   版本号由 VSIX 内的配置提供，通常无需在网页手动填写；后续版本按实际目标替换。
+
+### 上传并确认结果
+
+8. 点击 **Upload**，等待页面返回结果。若提示目标版本已存在，先核对管理页版本与远端内容，不删除已有版本或自行递增版本；其它上传错误也应先处理后重试。
+9. 确认页面明确显示上传提交成功，且管理页出现目标版本。保留成功提示或截图，将结果告知 AI；仅点击按钮或页面跳转不能作为成功证据。收到确认后，AI 安装本次上传的同一 VSIX 并核对本机版本。
+10. 若管理页显示验证或处理中，等待平台完成。打开 [插件商店页面](https://marketplace.visualstudio.com/items?itemName=bensz.bac-viewer)，确认公开版本已变为目标版本后，再认定已经上架。本次目标为 **`0.1.3`**；上传提交成功与商店公开可用分别记录。
 
 ## 本机安装最新版本
 
