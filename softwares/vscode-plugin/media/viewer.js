@@ -70,7 +70,7 @@
     const items = rows();
     $('results-label').textContent = `${items.length} ${tab === 'timeline' ? t('events · newest first') : t('changes')}`;
     $('events').replaceChildren();
-    if (!items.length) $('events').append(node('p', 'no-results', tab === 'changes' && !comparison ? t('Click “Compare ledger” to read the Git versions.') : nativeDiff && tab === 'changes' && !thisSideChanges() ? t('No changed events on this side.') : t('No matching events.')));
+    if (!items.length) $('events').append(node('p', 'no-results', tab === 'changes' && !comparison ? t('Click “Compare ledger” to read the Git versions.') : diffSide && tab === 'changes' && !thisSideChanges() ? t('No changed events on this side.') : t('No matching events.')));
     for (const item of items.slice(0, pageSize)) {
       const event = item.event;
       const key = item.change ? `change:${item.index}` : event.event_id;
@@ -95,13 +95,14 @@
     $('timeline-tab').classList.toggle('active', next === 'timeline');
     $('changes-tab').classList.toggle('active', next === 'changes');
     $('git-controls').hidden = next !== 'changes';
+    $('git-controls').classList.toggle('single-preview', nativeDiff && !diffSide);
     $('baseline').hidden = nativeDiff;
     document.querySelector('label[for=baseline]').hidden = nativeDiff;
     $('compare').hidden = nativeDiff;
     pageSize = 100; filters(); render();
   }
   function thisSideChanges() { return (comparison?.changes || []).filter(c => !diffSide || (diffSide === 'before' ? c.oldIndex !== undefined : c.newIndex !== undefined)).length; }
-  function details(event, change) {
+  function details(event, change, eventHistorical = historical) {
     if (diffSide === 'before' && change?.before) event = change.before;
     $('detail').replaceChildren();
     const head = node('div', 'detail-head');
@@ -117,7 +118,9 @@
     if (change) {
       const button = node('button', '', t('Open event JSON diff'));
       button.addEventListener('click', () => post('eventDiff', { index: Number(selected?.split(':')[1]) }));
-      $('detail').append(node('h3', '', t('Ledger changes')), button);
+      $('detail').append(node('h3', '', t('Ledger changes')));
+      if (change.kind === 'reordered') $('detail').append(node('p', 'note', t('Position {0} → {1}', change.oldIndex + 1, change.newIndex + 1)));
+      $('detail').append(button);
     }
     const files = Array.isArray(event.payload.files) ? event.payload.files.filter(f => f && typeof f.path === 'string') : [];
     if (files.length) {
@@ -126,7 +129,7 @@
         const box = node('div', 'file');
         box.append(node('div', 'mono', file.path), node('div', 'note mono', file.after_hash || (file.exists === false ? t('File did not exist when recorded') : t('No file hash recorded'))));
         const actions = node('div', 'file-actions');
-        for (const [action, label] of [['open', t(historical ? 'Open file in this version' : 'Open file')], ['worktree', t('HEAD → Working tree')], ['staged', t('HEAD → Index')], ['recorded', t('Recorded commit → Working tree')]]) {
+        for (const [action, label] of [['open', t(eventHistorical ? 'Open file in this version' : 'Open file')], ['worktree', t('HEAD → Working tree')], ['staged', t('HEAD → Index')], ['recorded', t('Recorded commit → Working tree')]]) {
           const button = node('button', '', label);
           button.disabled = !trusted;
           button.addEventListener('click', () => post('file', { id: event.event_id, path: file.path, action, changeIndex: change ? Number(selected?.split(':')[1]) : undefined }));
@@ -149,6 +152,7 @@
   }
   $('refresh').addEventListener('click', () => post('refresh'));
   $('verify').addEventListener('click', () => post('verify'));
+  $('open-baseline').addEventListener('click', () => post('openBaseline'));
   $('compare').addEventListener('click', () => post('compare', { mode: $('baseline').value }));
   $('timeline-tab').addEventListener('click', () => setTab('timeline'));
   $('changes-tab').addEventListener('click', () => setTab('changes'));
@@ -160,6 +164,7 @@
     if (data.type === 'error') notice(data.message, true);
     if (data.type === 'loadError' || data.type === 'missing') {
       ledger = undefined; comparison = undefined; diffSide = undefined; nativeDiff = false; verification(undefined); filters(); render();
+      $('open-baseline').hidden = true;
       $('filename').textContent = data.name; $('source').textContent = data.source;
       $('verify').disabled = true; $('compare').disabled = !data.trusted;
       $('compare-summary').textContent = t('Select a range to view event changes');
@@ -174,6 +179,7 @@
     if (data.type === 'ledger') {
       const wasNative = nativeDiff;
       ledger = data.ledger; comparison = undefined; diffSide = undefined; nativeDiff = false;
+      $('open-baseline').hidden = true;
       if (wasNative) setTab('timeline');
       trusted = data.trusted; historical = data.historical;
       source = restored.source && ['all', 'human', 'ai', 'tool', 'system'].includes(restored.source) ? restored.source : source;
@@ -188,10 +194,11 @@
       if (event) { selected = event.event_id; post('event', { id: event.event_id }); render(); }
       restored = {};
     }
-    if (data.type === 'detail' && data.selection === selected) details(data.event, data.change);
+    if (data.type === 'detail' && data.selection === selected) details(data.event, data.change, data.historical);
     if (data.type === 'comparison') {
       comparison = data.comparison;
       nativeDiff = !!data.native; diffSide = nativeDiff ? data.side : undefined;
+      $('open-baseline').hidden = !data.canOpenBaseline;
       if (data.mode) $('baseline').value = data.mode;
       const counts = {};
       for (const change of comparison.changes) counts[change.kind] = (counts[change.kind] || 0) + 1;
@@ -200,11 +207,12 @@
       notice(data.missingTarget ? data.missingBaseline ? t('Neither Git version contains this ledger.') : t('The target Git version deleted this ledger. Removed events are shown below.') : comparison.projectChanged ? t('The project binding changed. Check whether the ledgers belong to the same project.') : comparison.manifestChanged ? t('The container manifest changed. Inspect the event JSON and run full verification.') : data.missingBaseline ? t('The baseline has no ledger. All current events are shown as added.') : comparison.appendOnly ? comparison.changes.length ? t('The history prefix is preserved and events are appended. Run verification to check integrity.') : t('The ledger matches the baseline.') : t('History includes modifications, deletions, insertions or reordering. Inspect the changes and run verification.'), comparison.projectChanged || !comparison.appendOnly);
       setTab('changes');
       if (nativeDiff) {
-        const changedIds = new Set(items().map(item => item.event.event_id));
-        $('compare-summary').textContent += ' · ' + t('{0} unchanged events hidden', Math.max(0, (ledger?.count || 0) - changedIds.size));
+        const changedIds = new Set(comparison.changes.filter(change => diffSide === 'after' ? change.newIndex !== undefined : change.oldIndex !== undefined).map(change => change.event.event_id));
+        const visibleVersionCount = diffSide === 'after' ? comparison.afterCount : comparison.beforeCount;
+        $('compare-summary').textContent += ' · ' + t('{0} unchanged events hidden', visibleVersionCount - changedIds.size);
       }
       selected = undefined;
-      $('detail').replaceChildren(node('h2', '', t(nativeDiff ? 'No changed events on this side.' : 'No event changes.')), node('p', 'note', t('Use the contribution timeline to explore the full history.')));
+      $('detail').replaceChildren(node('h2', '', t(diffSide ? 'No changed events on this side.' : 'No event changes.')), node('p', 'note', t('Use the contribution timeline to explore the full history.')));
       const first = rows()[0];
       if (first) { selected = `change:${first.index}`; post('change', { index: first.index }); }
       render();

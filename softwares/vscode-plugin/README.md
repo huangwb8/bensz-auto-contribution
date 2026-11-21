@@ -15,7 +15,7 @@ The extension name, command palette entries and setting descriptions use English
 ## Usage
 
 - Open `.bac` from Explorer to view the contribution timeline. Filter by Human, AI, Tool or System, and search summaries, event types and related files.
-- Click a `.bac` change in **Source Control** to open its Git versions directly. Each side displays its actual source and its own timeline, filters and verification state.
+- Click a tracked `.bac` change in **Source Control** to open a single Git preview. The preview shows both version labels and all changed events, including records removed from the baseline.
 - Select an event to inspect its source, timestamp, trust claim, Git commit, file hashes, command evidence and raw JSON.
 - Switch to **Git changes**, select **HEAD → Working tree**, **HEAD → Index** or **Index → Working tree**, then click **Compare ledger**.
 - Comparisons show added, modified, removed and reordered events, plus manifest and project binding changes. Select a change to open a native event JSON diff.
@@ -32,13 +32,13 @@ The viewer accepts local `file:` and built-in `git:` resources only. Git resourc
 
 Git ledgers are read as bounded raw blobs with `git cat-file`. The viewer bypasses textconv and content filters so the ZIP and verification snapshots preserve the stored bytes. It requires an enabled built-in Git extension and a trusted workspace, never substitutes the current working tree for a failed historical read, and does not use proposed diff APIs.
 
-**Open file in this version** reads related code from the viewed Git source. The three existing code comparison actions and **BAC: Compare Ledger with HEAD** keep their explicit HEAD/index/working tree ranges. Event comparisons do not change the timeline's version or transfer verification between sides.
+**Open file in this version** reads related code from the viewed Git source. Removed records in the single preview use the baseline. The code comparison actions and **BAC: Compare Ledger with HEAD** use their labeled Git ranges. Verification reports are tied to the snapshot actually checked.
 
 ## Changes first in Source Control
 
-Tracked ledger changes and staged changes open with only added, removed, modified or reordered events on each side. Shared history is hidden with a count; source filters count the visible changes. Select **Contribution timeline** to read the full version. Verification still checks the complete snapshot on each side, and mutable comparisons refresh when Git or ledger content changes.
+Tracked ledger changes and staged changes open with a single list of added, removed, modified and reordered events. The preview counts hidden shared history, and source filters apply to the change list. Select **Contribution timeline** to read the full target version or **Open baseline ledger** to read and verify the baseline separately. The preview refreshes when Git or ledger content changes.
 
-This uses stable VS Code panel visibility and the built-in Git `~`/worktree and HEAD/index source combinations within one editor group. Separate editor groups and standalone versions are not paired. Ambiguous historical comparisons and single-sided additions/deletions retain the normal reader; use **Git changes** for an explicit comparison range. No proposed diff API is enabled.
+The extension identifies the built-in Git `~`/worktree and HEAD/index combinations within one editor group using stable VS Code APIs. Standalone versions and single-sided additions and deletions use the ledger reader. Use **Git changes** there to choose an explicit comparison range.
 
 ## Installation
 
@@ -48,7 +48,7 @@ Building requires Node.js 22.12+ (or a supported newer version). Requires deskto
 cd softwares/vscode-plugin
 npm ci
 npm run package
-code --install-extension dist/bac-viewer-0.1.3.vsix --force
+code --install-extension dist/bac-viewer-0.1.4.vsix --force
 ```
 
 Alternatively, choose **Install from VSIX** in the Extensions view menu. For an already open `.bac`, right-click its tab and choose **Reopen Editor With → BAC Contribution Ledger**. Run **Developer: Reload Window** if the viewer does not activate after installation.

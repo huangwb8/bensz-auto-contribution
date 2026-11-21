@@ -4,9 +4,7 @@
 
 插件源码和包配置位于 `softwares/vscode-plugin`。版本以该目录的 `package.json` 为准，与根目录 Python 包版本独立。用户指定发布版本时先同步插件版本；未指定时使用现有版本，不自动升级。
 
-本次目标版本为 `0.1.3`，发布者 ID 为 `bensz`，插件 ID 为 `bensz.bac-viewer`。版本与发布状态分别核对；本地打包不代表已经上传或公开上架。
-
-2026-11-14 发布检查时，官方 Gallery API 已返回公开版本 `0.1.3`，本机 CLI 也列出 `bensz.bac-viewer@0.1.3`。本轮按指定版本重新准备 VSIX，不重复上传或覆盖商店已有版本。下方教程保留给尚未发布的目标版本使用；若要发布新的插件内容，需要另行指定一个未发布的版本号。
+本次目标版本为 `0.1.4`，发布者 ID 为 `bensz`，插件 ID 为 `bensz.bac-viewer`。版本与发布状态分别核对；本地打包不代表已经上传或公开上架。
 
 ## 默认发布流程
 
@@ -56,7 +54,7 @@ npm run package
 
 ### 选择并核对 VSIX
 
-6. 选择本次经过检查的 `softwares/vscode-plugin/dist/bac-viewer-0.1.3.vsix`。后续发布时，以 `package.json` 中的目标版本及 AI 提供的已检查产物为准，不要误选旧文件。
+6. 选择本次经过检查的 `softwares/vscode-plugin/dist/bac-viewer-0.1.4.vsix`。后续发布时，以 `package.json` 中的目标版本及 AI 提供的已检查产物为准，不要误选旧文件。
 
    在 macOS 文件选择窗口中可按 **⌘⇧G**，粘贴当前项目下的 `softwares/vscode-plugin/dist/` 完整路径，再选择文件。本机当前路径为：
 
@@ -67,7 +65,7 @@ npm run package
    换设备或移动仓库后，应使用新的项目路径。在仓库根目录可以执行以下命令核对 AI 提供的 SHA-256：
 
    ```bash
-   shasum -a 256 softwares/vscode-plugin/dist/bac-viewer-0.1.3.vsix
+   shasum -a 256 softwares/vscode-plugin/dist/bac-viewer-0.1.4.vsix
    ```
 
 7. 上传前核对目标和所选文件：
@@ -77,8 +75,8 @@ npm run package
    | 发布者 | `bensz` |
    | 插件 | `bac-viewer` |
    | 插件 ID | `bensz.bac-viewer` |
-   | 新版本 | `0.1.3` |
-   | 文件 | `bac-viewer-0.1.3.vsix` |
+   | 新版本 | `0.1.4` |
+   | 文件 | `bac-viewer-0.1.4.vsix` |
 
    版本号由 VSIX 内的配置提供，通常无需在网页手动填写；后续版本按实际目标替换。
 
@@ -86,7 +84,7 @@ npm run package
 
 8. 点击 **Upload**，等待页面返回结果。若提示目标版本已存在，先核对管理页版本与远端内容，不删除已有版本或自行递增版本；其它上传错误也应先处理后重试。
 9. 确认页面明确显示上传提交成功，且管理页出现目标版本。保留成功提示或截图，将结果告知 AI；仅点击按钮或页面跳转不能作为成功证据。收到确认后，AI 安装本次上传的同一 VSIX 并核对本机版本。
-10. 若管理页显示验证或处理中，等待平台完成。打开 [插件商店页面](https://marketplace.visualstudio.com/items?itemName=bensz.bac-viewer)，确认公开版本已变为目标版本后，再认定已经上架。本次目标为 **`0.1.3`**；上传提交成功与商店公开可用分别记录。
+10. 若管理页显示验证或处理中，等待平台完成。打开 [插件商店页面](https://marketplace.visualstudio.com/items?itemName=bensz.bac-viewer)，确认公开版本已变为目标版本后，再认定已经上架。本次目标为 **`0.1.4`**；上传提交成功与商店公开可用分别记录。
 
 ## 本机安装最新版本
 

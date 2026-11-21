@@ -21,7 +21,11 @@ export async function run(): Promise<void> {
   await vscode.commands.executeCommand('workbench.view.scm');
   await writeFile(path.join(output, 'scm-ready'), JSON.stringify({ version: vscode.version }));
   await waitFor(path.join(output, 'click-done'));
-  await vscode.commands.executeCommand('git.openChange', uri);
+  const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+  assert.ok(input instanceof vscode.TabInputCustom && input.uri.scheme === 'bac-git-preview');
+  assert.ok(vscode.window.tabGroups.activeTabGroup.tabs.some(tab =>
+    tab.input instanceof vscode.TabInputCustom && tab.input.uri.toString() === uri.toString()), 'Replacing the diff must preserve the standalone ledger tab.');
+  await vscode.commands.executeCommand('bacViewer.verify', input.uri);
   await writeFile(path.join(output, 'command-done'), 'done');
   await waitFor(path.join(output, 'scm-done'));
   const gitUri = (ref: string, filename = uri.fsPath) => vscode.Uri.file(filename).with({ scheme: 'git', query: JSON.stringify({ path: filename, ref }) });
@@ -144,6 +148,14 @@ export async function run(): Promise<void> {
   assert.equal(index.panel.messages.length, closedMessages);
   assert.equal(index.session.closed, true);
   assert.ok(viewer['sessions'].has(head.session));
+  // Removing a record still appears when the target ledger itself exists.
+  await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+  await writeFile(uri.fsPath, initialIndex); await git('add', 'docs/contribution.bac');
+  await writeFile(uri.fsPath, await git('show', 'HEAD:docs/contribution.bac'));
+  await repository.status();
+  await vscode.commands.executeCommand('git.openChange', uri);
+  await step('removed-event', { counts: [2] });
+  await git('reset', '--', 'docs/contribution.bac'); await repository.status();
   // Real native diff for deletion: absent file side is represented explicitly.
   await vscode.commands.executeCommand('workbench.action.closeAllEditors');
   await rm(uri.fsPath); await repository.status();
@@ -155,7 +167,7 @@ export async function run(): Promise<void> {
   await git('mv', 'docs/contribution.bac', 'docs/renamed.bac'); await repository.status();
   await vscode.commands.executeCommand('workbench.action.closeAllEditors');
   await vscode.commands.executeCommand('git.openChange', vscode.Uri.file(renamed));
-  await step('renamed', { counts: [2, 2], names: ['contribution.bac', 'renamed.bac'] });
+  await step('renamed', { counts: [2] });
   await git('reset', '--', 'docs/contribution.bac', 'docs/renamed.bac');
   await rename(renamed, uri.fsPath); await repository.status();
   // Added ledger and unborn HEAD are distinct from corrupt/unavailable versions.

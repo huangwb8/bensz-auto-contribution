@@ -11,11 +11,12 @@ import { runFile, readBlob, parseGitResource, gitRef } from './git';
 export { runFile } from './git';
 
 const VIEW = 'bac.viewer';
+const GIT_PREVIEW = 'bac-git-preview';
 type CompareMode = 'head-worktree' | 'head-index' | 'index-worktree';
 const LABELS: Record<CompareMode, string> = { 'head-worktree': 'HEAD → Working tree', 'head-index': 'HEAD → Index', 'index-worktree': 'Index → Working tree' };
 interface GitRepository {
   rootUri: vscode.Uri;
-  state: { indexChanges: { uri: vscode.Uri }[]; onDidChange: vscode.Event<void> };
+  state: { indexChanges: { uri: vscode.Uri; originalUri?: vscode.Uri }[]; onDidChange: vscode.Event<void> };
 }
 interface DocumentSource {
   localUri: vscode.Uri;
@@ -23,11 +24,16 @@ interface DocumentSource {
   ref?: string;
   originalRef?: string;
   root?: string;
+  worktreeRoot?: string;
   repository?: GitRepository;
   mutable: boolean;
 }
 interface Session {
+  editorUri: vscode.Uri;
   uri: vscode.Uri;
+  baselineUri?: vscode.Uri;
+  baseline?: DocumentSource;
+  baselineDigest?: string;
   panel: vscode.WebviewPanel;
   source?: DocumentSource;
   closed?: boolean;
@@ -56,6 +62,7 @@ export class TextDocuments implements vscode.TextDocumentContentProvider {
 
 export class Viewer implements vscode.CustomReadonlyEditorProvider {
   private sessions = new Set<Session>();
+  private replacingTabs = new WeakSet<vscode.Tab>();
   private pairTimer?: ReturnType<typeof setTimeout>;
   constructor(private context: vscode.ExtensionContext, private texts: TextDocuments) {}
 
@@ -65,12 +72,14 @@ export class Viewer implements vscode.CustomReadonlyEditorProvider {
   }
 
   async openCustomDocument(uri: vscode.Uri): Promise<vscode.CustomDocument> {
-    if (!['file', 'git'].includes(uri.scheme)) throw new Error(t('Only local files and Git ledger versions are supported.'));
+    if (uri.scheme === GIT_PREVIEW) this.previewResources(uri);
+    else if (!['file', 'git'].includes(uri.scheme)) throw new Error(t('Only local files and Git ledger versions are supported.'));
     return { uri, dispose() {} };
   }
 
   async resolveCustomEditor(document: vscode.CustomDocument, panel: vscode.WebviewPanel): Promise<void> {
-    const session: Session = { uri: document.uri, panel, generation: 0 };
+    const resources = document.uri.scheme === GIT_PREVIEW ? this.previewResources(document.uri) : undefined;
+    const session: Session = { editorUri: document.uri, uri: resources?.target ?? document.uri, baselineUri: resources?.baseline, panel, generation: 0 };
     this.sessions.add(session);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const subscriptions: vscode.Disposable[] = [];
@@ -82,7 +91,7 @@ export class Viewer implements vscode.CustomReadonlyEditorProvider {
       if (session.peer) { session.peer.peer = undefined; session.peer.side = undefined; }
       subscriptions.forEach(item => item.dispose());
     }));
-    try { session.source = await this.source(document.uri); }
+    try { session.source = await this.source(session.uri); }
     catch { /* Refresh renders source errors inside the viewer. */ }
     if (session.closed) return;
     panel.webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'media')] };
@@ -97,14 +106,24 @@ export class Viewer implements vscode.CustomReadonlyEditorProvider {
           await vscode.workspace.getConfiguration('bacViewer').update('language', value.language, vscode.ConfigurationTarget.Global);
         }
         else if (value.type === 'ready' || value.type === 'refresh') { this.schedulePairing(); await this.refresh(session); }
-        else if (value.type === 'compare' && ['head-worktree', 'head-index', 'index-worktree'].includes(String(value.mode))) await this.compare(session, value.mode as CompareMode);
+        else if (value.type === 'compare' && !session.baselineUri && ['head-worktree', 'head-index', 'index-worktree'].includes(String(value.mode))) await this.compare(session, value.mode as CompareMode);
         else if (value.type === 'verify') await this.verify(session);
+        else if (value.type === 'openBaseline' && session.baselineUri && session.baselineDigest && session.baseline) {
+          const baseline = session.baseline;
+          const uri = baseline.originalRef === 'HEAD' && baseline.ref && baseline.ref !== 'HEAD'
+            ? session.baselineUri.with({ query: JSON.stringify({ path: baseline.localUri.fsPath, ref: baseline.ref }) })
+            : session.baselineUri;
+          await vscode.commands.executeCommand('vscode.openWith', uri, VIEW, { viewColumn: panel.viewColumn });
+        }
         else if (value.type === 'event' && typeof value.id === 'string') {
           const event = session.ledger?.events.find(item => item.event_id === value.id);
           if (event) await panel.webview.postMessage({ type: 'detail', event, selection: value.id });
         } else if (value.type === 'change' && Number.isInteger(value.index)) {
           const change = session.comparison?.changes[value.index as number];
-          if (change) await panel.webview.postMessage({ type: 'detail', event: change.event, change, selection: `change:${value.index}` });
+          if (change) {
+            const historical = session.uri.scheme === 'git' || (change.kind === 'removed' && !!session.baseline);
+            await panel.webview.postMessage({ type: 'detail', event: change.event, change, historical, selection: `change:${value.index}` });
+          }
         } else if (value.type === 'eventDiff' && Number.isInteger(value.index)) {
           const change = session.comparison?.changes[value.index as number];
           if (change) {
@@ -117,7 +136,8 @@ export class Viewer implements vscode.CustomReadonlyEditorProvider {
           const changedEvent = change ? session.side === 'before' ? change.before ?? change.event : change.event : undefined;
           const candidates = changedEvent ? [changedEvent] : session.ledger?.events ?? [];
           const event = candidates.find(item => item.event_id === value.id && this.filePaths(item).includes(value.path as string));
-          if (event && ['open', 'worktree', 'staged', 'recorded'].includes(String(value.action))) await this.openFile(session, event, value.path, String(value.action));
+          const source = change?.kind === 'removed' && session.baseline ? session.baseline : session.source;
+          if (event && ['open', 'worktree', 'staged', 'recorded'].includes(String(value.action))) await this.openFile(session, event, value.path, String(value.action), source);
         }
       } catch (error) { await this.error(session, error); }
     });
@@ -135,14 +155,14 @@ export class Viewer implements vscode.CustomReadonlyEditorProvider {
       clearTimeout(timer);
       timer = setTimeout(() => { void this.checkForChanges(session); }, 200);
     };
-    if (document.uri.scheme === 'file') {
-      const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(path.dirname(document.uri.fsPath), path.basename(document.uri.fsPath)));
+    if (session.uri.scheme === 'file') {
+      const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(path.dirname(session.uri.fsPath), path.basename(session.uri.fsPath)));
       subscriptions.push(watcher, watcher.onDidChange(gitChanged), watcher.onDidCreate(gitChanged), watcher.onDidDelete(gitChanged));
     }
     let watchedRepository: GitRepository | undefined;
     let repositorySubscription: vscode.Disposable | undefined;
     session.watchSource = () => {
-      const repository = session.source?.repository ?? session.peer?.source?.repository;
+      const repository = session.source?.repository ?? session.baseline?.repository ?? session.peer?.source?.repository;
       if ((session.source?.mutable || session.peer?.source?.mutable) && repository && watchedRepository !== repository && !session.closed) {
         repositorySubscription?.dispose();
         watchedRepository = repository;
@@ -164,7 +184,7 @@ export class Viewer implements vscode.CustomReadonlyEditorProvider {
   // column, but does not expose custom diff tab inputs. Pair only the unambiguous
   // built-in SCM source combinations; independent editor groups never qualify.
   private pairScmViews(): void {
-    const visible = [...this.sessions].filter(s => !s.closed && s.panel.visible && s.panel.viewColumn !== undefined && s.source);
+    const visible = [...this.sessions].filter(s => !s.closed && !s.baselineUri && s.panel.visible && s.panel.viewColumn !== undefined && s.source);
     for (const current of visible) {
       if (current.peer) continue;
       const group = visible.filter(s => s.panel.viewColumn === current.panel.viewColumn);
@@ -176,7 +196,9 @@ export class Viewer implements vscode.CustomReadonlyEditorProvider {
         : baseline.source.originalRef === 'HEAD';
       if (!scm) continue;
       const targetPath = target.source!.localUri.fsPath;
-      if (!inside(baseline.source.root, targetPath)) continue;
+      const baselinePath = baseline.source.localUri.fsPath;
+      if (!inside(baseline.source.root, targetPath) || (targetPath !== baselinePath &&
+          !baseline.source.repository?.state.indexChanges.some(change => change.uri.fsPath === targetPath && change.originalUri?.fsPath === baselinePath))) continue;
       // Different paths are legitimate for SCM renames. Both sides still pass
       // normal project/path validation and keep their own verification snapshots.
       baseline.peer = target; baseline.side = 'before';
@@ -185,7 +207,45 @@ export class Viewer implements vscode.CustomReadonlyEditorProvider {
         session.watchSource?.();
         void this.refresh(session).catch(error => this.error(session, error));
       }
+      const tab = vscode.window.tabGroups.all.find(group => group.viewColumn === target.panel.viewColumn)?.activeTab;
+      // VS Code's stable Tab API has no custom diff input. An opaque active
+      // tab and both visible BAC panels in its group identify the fallback diff.
+      if (tab && tab.input === undefined && !tab.isDirty && !this.replacingTabs.has(tab)) {
+        this.replacingTabs.add(tab);
+        void this.replaceScmTab(tab, baseline.uri, target.uri).catch(() => {
+          // The original pair already renders the comparison if the host cannot replace it.
+          this.replacingTabs.delete(tab);
+        });
+      }
     }
+  }
+
+  private async replaceScmTab(tab: vscode.Tab, baseline: vscode.Uri, target: vscode.Uri): Promise<void> {
+    const uri = vscode.Uri.from({ scheme: GIT_PREVIEW, path: target.path, query: JSON.stringify([baseline.toString(), target.toString()]) });
+    await vscode.commands.executeCommand('vscode.openWith', uri, VIEW, {
+      viewColumn: tab.group.viewColumn,
+      preview: tab.isPreview,
+      preserveFocus: !tab.group.isActive,
+    });
+    const tabs = tab.group.tabs;
+    const opened = tabs.find(candidate => candidate.input instanceof vscode.TabInputCustom &&
+      candidate.input.viewType === VIEW && candidate.input.uri.toString() === uri.toString());
+    if (opened && tabs.includes(tab)) await vscode.window.tabGroups.close(tab, true);
+  }
+
+  private previewResources(uri: vscode.Uri): { baseline: vscode.Uri; target: vscode.Uri } {
+    const invalid = () => new Error(t('Invalid or unsupported Git ledger URI.'));
+    let pair: unknown;
+    try { pair = JSON.parse(uri.query); } catch { throw invalid(); }
+    if (uri.authority || uri.fragment || !Array.isArray(pair) || pair.length !== 2 || !pair.every(item => typeof item === 'string')) throw invalid();
+    const [baseline, target] = pair.map(item => vscode.Uri.parse(item, true));
+    if (baseline.scheme !== 'git' || baseline.authority || baseline.fragment || target.path !== uri.path) throw invalid();
+    const before = parseGitResource(baseline.query, baseline.fsPath);
+    if (target.scheme === 'file' && !target.authority && !target.query && !target.fragment &&
+        /\.bac$/i.test(target.path) && before.ref === '~') return { baseline, target };
+    if (target.scheme === 'git' && !target.authority && !target.fragment && before.ref === 'HEAD' &&
+        parseGitResource(target.query, target.fsPath).ref === '') return { baseline, target };
+    throw invalid();
   }
 
   private async source(uri: vscode.Uri): Promise<DocumentSource> {
@@ -230,6 +290,7 @@ export class Viewer implements vscode.CustomReadonlyEditorProvider {
       source.repository = repository;
       return this.blob(source.root, this.ref(source), path.relative(source.root, source.localUri.fsPath).split(path.sep).join('/'));
     }
+    if (source.worktreeRoot) await safeProjectPath(source.worktreeRoot, path.relative(source.worktreeRoot, source.localUri.fsPath).split(path.sep).join('/'));
     source.label = t('Working tree');
     try {
       const stat = await vscode.workspace.fs.stat(source.localUri);
@@ -275,10 +336,13 @@ export class Viewer implements vscode.CustomReadonlyEditorProvider {
     try {
       if (!session.source || session.closed) return;
       const label = session.source.label;
+      const baselineLabel = session.baseline?.label;
       const bytes = await this.bytes(session.source);
+      const baselineBytes = session.baseline ? await this.bytes(session.baseline) : undefined;
       session.watchSource?.();
       if (session.closed || generation !== session.generation) return;
-      if (!session.peer && (bytes ? digest(bytes) : undefined) === session.ledger?.digest && label === session.source.label) return;
+      if (!session.peer && (bytes ? digest(bytes) : undefined) === session.ledger?.digest && label === session.source.label &&
+          (baselineBytes ? digest(baselineBytes) : undefined) === session.baselineDigest && baselineLabel === session.baseline?.label) return;
     } catch { /* Refresh reports unavailable Git resources inside this side. */ }
     if (!session.closed && generation === session.generation) {
       await this.refresh(session);
@@ -291,32 +355,48 @@ export class Viewer implements vscode.CustomReadonlyEditorProvider {
     await session.panel.webview.postMessage({ type: 'busy', text: t('Reading ledger…') });
     try {
       if (!session.source) session.source = await this.source(session.uri);
+      if (session.baselineUri && !session.baseline) {
+        const baseline = await this.source(session.baselineUri);
+        const localUri = session.source.localUri;
+        if (!baseline.root || !inside(baseline.root, localUri.fsPath) ||
+            !vscode.workspace.getWorkspaceFolder(localUri) ||
+            (session.source.root && session.source.root !== baseline.root)) throw new Error(t('The file path is outside the current project.'));
+        if (session.uri.scheme === 'file') session.source.worktreeRoot = baseline.root;
+        session.baseline = baseline;
+      }
       session.watchSource?.();
       const bytes = await this.bytes(session.source);
       session.watchSource?.();
       const ledger = bytes ? await readLedger(bytes) : undefined;
       const peer = session.peer;
-      const otherBytes = peer?.source ? await this.bytes(peer.source) : undefined;
+      const otherSource = session.baseline ?? peer?.source;
+      const otherBytes = otherSource ? await this.bytes(otherSource) : undefined;
       const other = otherBytes ? await readLedger(otherBytes) : undefined;
       if (generation !== session.generation) return;
       if (session.ledger?.digest !== ledger?.digest) session.verification = undefined;
       session.ledger = ledger;
+      session.baselineDigest = session.baseline ? other?.digest : undefined;
       session.comparison = undefined;
       session.mode = undefined;
-      session.panel.title = `${path.basename(session.source.localUri.fsPath)} · ${session.source.label}`;
+      session.panel.title = `${path.basename(session.source.localUri.fsPath)} · ${session.baseline ? t('Git changes') : session.source.label}`;
       if (ledger) await this.postLedger(session);
       else await session.panel.webview.postMessage({ type: 'missing', name: path.basename(session.source.localUri.fsPath), source: session.source.label, trusted: vscode.workspace.isTrusted });
-      if (peer && !peer.closed && session.peer === peer) {
+      if (session.baseline || (peer && !peer.closed && session.peer === peer)) {
         const before = session.side === 'before' ? ledger : other;
-        const after = session.side === 'after' ? ledger : other;
+        const after = session.side === 'before' ? other : ledger;
+        const from = session.side === 'before' ? session.source : otherSource!;
+        const to = session.side === 'before' ? otherSource! : session.source;
         session.comparison = compareLedgers(before, after ?? { manifest: before?.manifest ?? {}, events: [], digest: '' });
         await session.panel.webview.postMessage({ type: 'comparison', native: true, side: session.side,
-          label: `${session.side === 'before' ? session.source.label : peer.source!.label} → ${session.side === 'after' ? session.source.label : peer.source!.label}`,
+          label: from.localUri.fsPath === to.localUri.fsPath ? `${from.label} → ${to.label}`
+            : `${from.label} (${path.basename(from.localUri.fsPath)}) → ${to.label} (${path.basename(to.localUri.fsPath)})`,
+          canOpenBaseline: !!session.baselineDigest,
           missingBaseline: !before, missingTarget: !after, comparison: session.comparison });
       }
     } catch (error) {
       if (generation !== session.generation) return;
       session.ledger = undefined;
+      session.baselineDigest = undefined;
       session.comparison = undefined;
       session.verification = undefined;
       await session.panel.webview.postMessage({ type: 'loadError', name: path.basename(session.source?.localUri.fsPath ?? session.uri.fsPath), source: session.source?.label || t('Git version'), message: String(error instanceof Error ? error.message : error) });
@@ -379,8 +459,9 @@ export class Viewer implements vscode.CustomReadonlyEditorProvider {
     const generation = session.generation;
     const expectedDigest = session.ledger.digest;
     const folder = vscode.workspace.getWorkspaceFolder(session.source?.localUri ?? session.uri);
-    let root = session.source?.root ?? folder?.uri.fsPath ?? path.dirname((session.source?.localUri ?? session.uri).fsPath);
-    if (!session.source?.root) {
+    const sourceRoot = session.source?.root ?? session.source?.worktreeRoot;
+    let root = sourceRoot ?? folder?.uri.fsPath ?? path.dirname((session.source?.localUri ?? session.uri).fsPath);
+    if (!sourceRoot) {
       try { root = await this.root(session.source?.localUri ?? session.uri); } catch { /* Verification also works outside Git. */ }
     }
     let executable = vscode.workspace.getConfiguration('bacViewer').get<string>('bacExecutable', 'bac');
@@ -421,22 +502,23 @@ export class Viewer implements vscode.CustomReadonlyEditorProvider {
     return Array.isArray(event.payload.files) ? event.payload.files.filter(isObject).map(file => file.path).filter((item): item is string => typeof item === 'string') : [];
   }
 
-  private async openFile(session: Session, event: BacEvent, relative: string, action: string): Promise<void> {
+  private async openFile(session: Session, event: BacEvent, relative: string, action: string, source = session.source): Promise<void> {
     this.trust();
+    const localUri = source?.localUri ?? session.uri;
     let root: string;
-    try { root = session.source?.root ?? await this.root(session.source?.localUri ?? session.uri); }
+    try { root = source?.root ?? source?.worktreeRoot ?? await this.root(localUri); }
     catch {
       if (action !== 'open') throw new Error(t('Code diffs require a Git repository.'));
-      const folder = vscode.workspace.getWorkspaceFolder(session.source?.localUri ?? session.uri);
+      const folder = vscode.workspace.getWorkspaceFolder(localUri);
       if (!folder) throw new Error(t('Open a project folder to locate related files.'));
       root = folder.uri.fsPath;
     }
     const target = await safeProjectPath(root, relative);
     if (action === 'open') {
-      if (session.uri.scheme === 'git' && session.source) {
-        const data = await this.blob(root, this.ref(session.source), relative, 5 * 1024 * 1024);
+      if (source?.root) {
+        const data = await this.blob(root, this.ref(source), relative, 5 * 1024 * 1024);
         if (!data) throw new Error(t('The related file does not exist in this Git version.'));
-        await vscode.commands.executeCommand('vscode.open', this.texts.put(`${session.source.label}/${path.basename(relative)}`, this.text(data)));
+        await vscode.commands.executeCommand('vscode.open', this.texts.put(`${source.label}/${path.basename(relative)}`, this.text(data)));
       } else await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(target));
       return;
     }
@@ -480,14 +562,15 @@ export class Viewer implements vscode.CustomReadonlyEditorProvider {
   async command(action: 'open' | 'compare' | 'verify', input?: unknown): Promise<void> {
     let uri = input instanceof vscode.Uri ? input : isObject(input) && input.resourceUri instanceof vscode.Uri ? input.resourceUri : undefined;
     let session = [...this.sessions].find(item => item.panel.active) ?? [...this.sessions].at(-1);
-    uri ??= session?.uri;
+    uri ??= session?.editorUri;
     if (!uri) {
       uri = (await vscode.window.showOpenDialog({ canSelectMany: false, filters: { [t('BAC Contribution Ledger')]: ['bac'] } }))?.[0];
     }
     if (!uri) return;
-    if (!session || session.uri.toString() !== uri.toString()) {
+    if (action === 'compare' && uri.scheme === GIT_PREVIEW) uri = this.previewResources(uri).target;
+    if (!session || session.editorUri.toString() !== uri.toString()) {
       await vscode.commands.executeCommand('vscode.openWith', uri, VIEW);
-      session = [...this.sessions].find(item => item.uri.toString() === uri!.toString());
+      session = [...this.sessions].find(item => item.editorUri.toString() === uri!.toString());
     } else session.panel.reveal();
     if (session && action !== 'open') {
       try {

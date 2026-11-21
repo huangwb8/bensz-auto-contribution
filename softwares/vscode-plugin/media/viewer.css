@@ -43,6 +43,8 @@ summary { cursor: pointer; color: var(--muted); }
 #git-controls label { margin-right: 10px; color: var(--muted); }
 select { background: var(--vscode-dropdown-background, var(--surface)); color: var(--fg); border: 1px solid var(--line); border-radius: 3px; padding: 6px; margin-right: 8px; }
 #compare-summary { display: block; margin-top: 8px; color: var(--muted); }
+#git-controls.single-preview { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.single-preview #compare-summary { flex: 1 1 32rem; margin-top: 0; overflow-wrap: anywhere; }
 .workspace { display: grid; grid-template-columns: minmax(270px, 36%) minmax(0, 1fr); min-height: 65vh; }
 .browser { border-right: 1px solid var(--line); }
 .filters { padding: 18px 20px 10px; }

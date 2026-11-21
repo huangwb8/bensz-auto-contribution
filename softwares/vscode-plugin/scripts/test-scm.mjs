@@ -66,79 +66,76 @@ try {
   // Click the real Source Control resource row, as a user would.
   const resources = page.locator('.scm-view .monaco-list-row').filter({ hasText: 'contribution.bac' });
   await resources.last().click();
-  await writeFile(path.join(output, 'click-done'), 'done');
-  await waitFile('command-done');
-  await page.waitForTimeout(1200);
-  await page.screenshot({ path: path.join(output, 'after-scm.jpg'), type: 'jpeg', quality: 85 });
   async function viewerFrames() {
     const result = [];
     for (const frame of page.frames()) {
-      if (!await frame.locator('#source').count()) continue;
-      // Background tabs can retain webviews with nonzero layout bounds. Check
-      // every embedding iframe so they cannot be mistaken for a visible side.
-      let visible = true;
-      for (let current = frame; current.parentFrame(); current = current.parentFrame()) {
-        if (!await (await current.frameElement()).isVisible()) { visible = false; break; }
+      try {
+        if (!await frame.locator('#source').count()) continue;
+        // Background tabs can retain webviews with nonzero layout bounds.
+        // Check every embedding iframe for visibility before counting it.
+        let visible = true;
+        for (let current = frame; current.parentFrame(); current = current.parentFrame()) {
+          if (!await (await current.frameElement()).isVisible()) { visible = false; break; }
+        }
+        if (!visible) continue;
+        const box = await (await frame.frameElement()).boundingBox();
+        const viewport = page.viewportSize();
+        if (box && box.width > 0 && box.height > 0 && box.x + box.width > 0 && box.y + box.height > 0 && box.x < viewport.width && box.y < viewport.height) result.push(frame);
+      } catch (error) {
+        if (!frame.isDetached() && !/frame (was|has been) detached/i.test(String(error))) throw error;
       }
-      if (!visible) continue;
-      const box = await (await frame.frameElement()).boundingBox();
-      const viewport = page.viewportSize();
-      if (box && box.width > 0 && box.height > 0 && box.x + box.width > 0 && box.y + box.height > 0 && box.x < viewport.width && box.y < viewport.height) result.push(frame);
     }
     return result;
   }
-  async function assertViews(expected, absent = false) {
+  async function assertViews(expected, absent = false, preview = false) {
     const deadline = Date.now() + 15_000;
     while (Date.now() < deadline) {
       const frames = await viewerFrames();
       const counts = [];
       let missing = false;
       for (const frame of frames) {
-        const count = await frame.locator('#count').textContent();
+        const count = await frame.locator('#count').textContent({ timeout: 500 }).catch(() => undefined);
         const match = /^(\d+) events$/.exec(count);
         if (match) counts.push(Number(match[1]));
         if (count === 'Version absent') missing = true;
       }
-      if (frames.length && expected.every(count => counts.includes(count)) && (!absent || missing)) return frames;
+      if (frames.length === expected.length + Number(absent) && expected.every(count => counts.includes(count)) && (!absent || missing) &&
+          (!preview || await frames[0].locator('#open-baseline').isVisible().catch(() => false))) return frames;
       await page.waitForTimeout(100);
     }
     throw new Error(`Expected SCM counts ${JSON.stringify(expected)}, absent=${absent}`);
   }
-  async function assertChanges(frames, expected) {
-    for (const frame of frames) {
-      const source = await frame.locator('#source').textContent();
-      if (expected[source] === undefined) continue;
-      await frame.locator('#changes-tab.active').waitFor();
-      await frame.locator('#results-label').filter({ hasText: `${expected[source]} changes` }).waitFor();
-      const count = await frame.locator('.event-row').count();
-      if (count !== expected[source]) throw new Error(`Expected only ${expected[source]} changes for ${source}, got ${count}`);
-      if (!expected[source]) await frame.locator('#detail h2').filter({ hasText: 'No changed events on this side.' }).waitFor();
-      await frame.locator('#compare-summary').filter({ hasText: /unchanged events hidden/ }).waitFor();
-    }
+  async function assertChanges(frame, expected, range) {
+    await frame.locator('#changes-tab.active').waitFor();
+    await frame.locator('#results-label').filter({ hasText: `${expected} changes` }).waitFor();
+    const count = await frame.locator('.event-row').count();
+    if (count !== expected) throw new Error(`Expected ${expected} changes, got ${count}`);
+    await frame.locator('#compare-summary').filter({ hasText: range }).filter({ hasText: /unchanged events hidden/ }).waitFor();
   }
-  const initial = await assertViews([3, 4]);
-  await assertChanges(initial, { Index: 0, 'Working tree': 1 });
-  const working = (await Promise.all(initial.map(async frame => await frame.locator('#source').textContent() === 'Working tree' ? frame : undefined))).find(Boolean);
+  const [clicked] = await assertViews([4], false, true);
+  await assertChanges(clicked, 1, 'Index → Working tree');
+  await writeFile(path.join(output, 'click-done'), 'done');
+  await waitFile('command-done');
+  const [working] = await assertViews([4], false, true);
+  await working.locator('#validation').filter({ hasText: /Verification passed|Verification warnings/ }).waitFor();
   await working.locator('#timeline-tab').click();
   if (await working.locator('.event-row').count() !== 4) throw new Error('Full timeline must remain available.');
   await working.locator('#changes-tab').click();
-  await assertChanges(initial, { Index: 0, 'Working tree': 1 });
+  await assertChanges(working, 1, 'Index → Working tree');
   await page.screenshot({ path: path.join(output, 'after-changes-only.jpg'), type: 'jpeg', quality: 85 });
-  const sources = await Promise.all(initial.map(frame => frame.locator('#source').textContent()));
-  if (!sources.includes('Index') || !sources.includes('Working tree')) throw new Error(`SCM sides did not render: ${JSON.stringify(sources)}`);
   await writeFile(path.join(output, 'scm-done'), 'done');
   await waitFile('staged-ready');
   await page.locator('.scm-view .monaco-list-row').filter({ hasText: 'contribution.bac' }).first().click();
-  const staged = await assertViews([2, 3]);
-  await assertChanges(staged, { Index: 1 });
-  for (const frame of staged) {
+  let [indexView] = await assertViews([3], false, true);
+  await assertChanges(indexView, 1, /HEAD.*→ Index/);
+  async function verify(frame) {
     await frame.locator('#verify').click();
     await frame.locator('#validation').filter({ hasText: /Verification passed|Verification warnings/ }).waitFor();
     await frame.locator('#verification > summary').click();
     await frame.locator('#verification-content').filter({ hasText: 'Snapshot digest sha256:' }).waitFor();
   }
+  await verify(indexView);
   await page.screenshot({ path: path.join(output, 'after-staged-verified.jpg'), type: 'jpeg', quality: 85 });
-  const indexView = (await Promise.all(staged.map(async frame => (await frame.locator('#source').textContent()) === 'Index' ? frame : undefined))).find(Boolean);
   await indexView.getByRole('button', { name: /^AI / }).click();
   if (await indexView.locator('.event-row:not([data-source="ai"])').count()) throw new Error('Per-side source filter failed.');
   await indexView.getByRole('button', { name: /^All / }).click();
@@ -149,7 +146,13 @@ try {
     const deadline = Date.now() + 15_000;
     while (Date.now() < deadline) {
       const frames = await viewerFrames();
-      for (const frame of frames) if (await frame.locator('html').getAttribute('lang') === language && await frame.locator('#source').textContent() === source) return frame;
+      for (const frame of frames) {
+        try {
+          if (await frame.locator('html').getAttribute('lang', { timeout: 500 }) === language && await frame.locator('#source').textContent() === source) return frame;
+        } catch (error) {
+          if (!frame.isDetached() && !/frame (was|has been) detached/i.test(String(error))) throw error;
+        }
+      }
       await page.waitForTimeout(100);
     }
     throw new Error('Source labels were not localized.');
@@ -157,27 +160,27 @@ try {
   const chineseIndex = await localizedViews('zh-CN', '暂存区');
   await page.screenshot({ path: path.join(output, 'after-chinese-sides.jpg'), type: 'jpeg', quality: 85 });
   await chineseIndex.locator('#language').selectOption('en');
-  await localizedViews('en', 'Index');
+  indexView = await localizedViews('en', 'Index');
   await page.setViewportSize({ width: 1600, height: 1000 });
   await writeFile(path.join(output, 'staged-done'), 'done');
   await waitFile('light-ready');
-  await assertViews([2, 3]);
+  const [lightView] = await assertViews([3], false, true);
+  await verify(lightView);
   await page.waitForTimeout(200);
   await page.screenshot({ path: path.join(output, 'after-light.jpg'), type: 'jpeg', quality: 85 });
   await writeFile(path.join(output, 'light-done'), 'done');
   await waitFile('index-refresh-ready');
-  const updated = await assertViews([2, 4]);
-  const indexFrame = (await Promise.all(updated.map(async frame => (await frame.locator('#source').textContent()) === 'Index' ? frame : undefined))).find(Boolean);
+  const [indexFrame] = await assertViews([4], false, true);
   await indexFrame.locator('#validation').filter({ hasText: 'Not verified' }).waitFor();
-  const fixedFrame = (await Promise.all(updated.map(async frame => (await frame.locator('#source').textContent()).startsWith('HEAD') ? frame : undefined))).find(Boolean);
-  await fixedFrame.locator('#validation').filter({ hasText: /Verification passed|Verification warnings/ }).waitFor();
   await page.screenshot({ path: path.join(output, 'after-index-refresh.jpg'), type: 'jpeg', quality: 85 });
+  await indexFrame.locator('#open-baseline').click();
+  const [baselineFrame] = await assertViews([2]);
+  await verify(baselineFrame);
   await writeFile(path.join(output, 'index-refresh-done'), 'done');
-  for (const name of ['deleted', 'renamed', 'added', 'absent', 'corrupt']) {
+  for (const name of ['removed-event', 'deleted', 'renamed', 'added', 'absent', 'corrupt']) {
     const expectations = JSON.parse(await waitFile(`${name}-ready`));
     if (name === 'renamed') {
       await page.locator('.scm-view .monaco-list-row').filter({ hasText: 'renamed.bac' }).first().click();
-      await page.waitForTimeout(500);
     }
     let frames;
     if (expectations.error) {
@@ -188,29 +191,32 @@ try {
         await page.waitForTimeout(100);
       }
       if (!frames?.length) throw new Error('Error-state viewer did not open.');
-    } else frames = await assertViews(expectations.counts, expectations.absent);
+    } else frames = await assertViews(expectations.counts, expectations.absent, ['removed-event', 'renamed'].includes(name));
     if (expectations.error) {
       const frame = frames.at(-1);
       await frame.locator('#count').filter({ hasText: 'Unable to read' }).waitFor();
       await frame.locator('#notice').filter({ hasText: /ZIP container/ }).waitFor();
       if (!await frame.locator('#verify').isDisabled()) throw new Error('Corrupt ledger verification was enabled.');
     }
-    if (expectations.names) {
-      const names = await Promise.all(frames.map(frame => frame.locator('#filename').textContent()));
-      if (!expectations.names.every(name => names.includes(name))) throw new Error('Rename paths are incorrect.');
+    if (name === 'removed-event') {
+      await assertChanges(frames[0], 1, 'Index → Working tree');
+      await frames[0].locator('.event-row[data-change="removed"]').filter({ hasText: 'Index fixture' }).waitFor();
+    }
+    if (name === 'renamed') {
+      await assertChanges(frames[0], 0, /contribution\.bac.*→ Index \(renamed\.bac\)/);
     }
     await page.screenshot({ path: path.join(output, `after-${name}.jpg`), type: 'jpeg', quality: 85 });
     await writeFile(path.join(output, `${name}-done`), 'done');
   }
   await waitFile('all-done');
   await running;
-  await writeFile(path.join(output, 'scm-ui-result.json'), JSON.stringify({ status: 'pass', realWorkingTreeClick: true, realIndexClick: true, perSideVerification: true, independentFilters: true, localizedSources: true, narrow: true, themes: true, mutableRefresh: true, addedDeletedRenamed: true, absentAndErrorUI: true }));
+  await writeFile(path.join(output, 'scm-ui-result.json'), JSON.stringify({ status: 'pass', realWorkingTreeClick: true, realIndexClick: true, singlePane: true, removedEvent: true, verificationOfBothVersions: true, sourceFilters: true, localizedSources: true, narrow: true, themes: true, mutableRefresh: true, addedDeletedRenamed: true, absentAndErrorUI: true }));
   console.log(`SCM UI tests passed. Screenshots: ${output}`);
 } catch (error) {
   if (page) await page.screenshot({ path: path.join(output, 'failure.jpg'), type: 'jpeg', quality: 85 }).catch(() => {});
   await writeFile(path.join(output, 'click-done'), 'done');
   await writeFile(path.join(output, 'scm-done'), 'done');
-  for (const name of ['staged', 'light', 'index-refresh', 'deleted', 'renamed', 'added', 'absent', 'corrupt']) await writeFile(path.join(output, `${name}-done`), 'done');
+  for (const name of ['staged', 'light', 'index-refresh', 'removed-event', 'deleted', 'renamed', 'added', 'absent', 'corrupt']) await writeFile(path.join(output, `${name}-done`), 'done');
   await running.catch(() => {});
   throw error;
 } finally { if (browser) await browser.close(); }

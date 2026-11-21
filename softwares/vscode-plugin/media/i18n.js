@@ -20,6 +20,8 @@
   "Git version": "Git 版本",
   "The related file does not exist in this Git version.": "此 Git 版本中不存在该关联文件。",
   "Open file in this version": "打开此版本的文件",
+  "Open baseline ledger": "打开基线账本",
+  "Position {0} → {1}": "位置 {0} → {1}",
   "Version absent": "版本不存在",
   "No ledger in this version": "此版本没有账本",
   "This side has no file. The other side can still be read and verified.": "此侧没有文件，另一侧仍可读取与验证。",
